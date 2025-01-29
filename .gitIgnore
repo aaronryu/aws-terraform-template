@@ -1,0 +1,7 @@
+*.pem
+*.backup
+*.txt
+*.tfstate
+.terraform/*
+*.tfstate.backup
+*.tfvars
