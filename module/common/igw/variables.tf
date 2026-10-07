@@ -1,10 +1,11 @@
+
 variable "vpc_id" {
-    type = string
-    description = "vpc id of Internet gateway"
+  type        = string
+  description = "vpc id of internet gateway"
 }
 
 variable "environment" {
-    type = string
-    description = "environment of igw"
-    default = "development"
+  type        = string
+  description = "environment of resource"
+  default     = "development"
 }

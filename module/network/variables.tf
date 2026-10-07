@@ -1,4 +1,6 @@
+
 variable "environment" {
-    type = string
-    default = "development"
+  type        = string
+  description = "environment of resource"
+  default     = "development"
 }

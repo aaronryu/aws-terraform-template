@@ -1,141 +1,92 @@
-resource "aws_security_group" "server" {
-    name = "terraform-dev-server-sg"
-    vpc_id = var.vpc_id
-    description = "inbound : ssh + tcp / outbound: all"
-    ingress = [
-        {
-            cidr_blocks = [
-                "0.0.0.0/0",
-            ]
-            description = "ssh from all ips"
-            from_port = 22
-            to_port = 22
-            ipv6_cidr_blocks = []
-            prefix_list_ids  = []
-            protocol         = "tcp"
-            security_groups  = []
-            self             = false
-        },
-        {
-            cidr_blocks = [
-                "0.0.0.0/0",
-            ]
-            description = "tcp from all ips"
-            from_port = 8080
-            to_port = 8080
-            ipv6_cidr_blocks = []
-            prefix_list_ids  = []
-            protocol         = "tcp"
-            security_groups  = []
-            self             = false
-        }
-    ]
-    
-    egress = [
-        {
-            cidr_blocks = [
-                "0.0.0.0/0",
-            ]
-            description = ""
-            from_port = 0
-            to_port = 0
-            ipv6_cidr_blocks = []
-            prefix_list_ids  = []
-            protocol         = -1
-            security_groups  = []
-            self             = false
-        }
-    ]
-    
-    tags = {
-        Name = "terraform-dev-server-sg"
-        ManagedBy = "CY-Terraform"
-        Environment = var.environment
-    }
+
+# 1. Bastion SG: 외부(0.0.0.0/0)로부터 SSH(22) 접속 허용
+resource "aws_security_group" "bastion_sg" {
+  name        = "bastion-sg"
+  description = "Security Group for Bastion Host"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description = "SSH from anywhere"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "bastion-sg"
+    ManagedBy   = "aaron"
+    Environment = var.environment
+  }
 }
 
+# 2. NAT Instance SG: Private Subnet 대역에서 오는 모든 트래픽 허용
+resource "aws_security_group" "nat_instance_sg" {
+  name        = "nat-instance-sg"
+  description = "Security Group for NAT Instance"
+  vpc_id      = var.vpc_id
 
-resource "aws_security_group" "bastion" {
-    name = "bastion-dev-sg"
-    vpc_id = var.vpc_id
-    description = "inbound: SSH + all ips / outbound: all ips + all protocols"
-    ingress = [
-        {
-            cidr_blocks = [
-                "0.0.0.0/0",
-            ]
-            description = "ssh from all ips"
-            from_port = 22
-            to_port = 22
-            ipv6_cidr_blocks = []
-            prefix_list_ids  = []
-            protocol         = "tcp"
-            security_groups  = []
-            self             = false
-        },
-    ]
-    
-    egress = [
-        {
-            cidr_blocks = [
-                "0.0.0.0/0",
-            ]
-            description = ""
-            from_port = 0
-            to_port = 0
-            ipv6_cidr_blocks = []
-            prefix_list_ids  = []
-            protocol         = -1
-            security_groups  = []
-            self             = false
-        }
-    ]
-    
-    tags = {
-        Name = "terraform-dev-bastion-sg"
-        ManagedBy = "CY-Terraform"
-        Environment = var.environment
-    }
+  ingress {
+    description = "SSH from anywhere"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Allow all inbound from Private Subnet"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "nat-instance-sg"
+    ManagedBy   = "aaron"
+    Environment = var.environment
+  }
 }
 
+# 3. Private EC2 SG: Bastion SG를 통해서만 SSH(22) 접속 허용
+resource "aws_security_group" "private_server_sg" {
+  name        = "private-server-sg"
+  description = "Security Group for Private Server"
+  vpc_id      = var.vpc_id
 
+  ingress {
+    description     = "SSH from Bastion Security Group"
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    security_groups = [aws_security_group.bastion_sg.id] # Bastion SG에 대해서만 허용
+  }
 
-resource "aws_security_group" "rds" {
-    name = "rds-sg"
-    vpc_id = var.vpc_id
-    description = "inbound : server, bastion / outbound : all protocols"
-    tags = {
-        Name = "rds-security-group"
-        ManagedBy = "CY-Terraform"
-        Environment = var.environment
-    }
-    ingress = [
-        {
-            cidr_blocks = []
-            description = "MySQL inbound from server and bastion"
-            from_port = 3306
-            to_port = 3306
-            ipv6_cidr_blocks = []
-            prefix_list_ids = []
-            protocol = "tcp"
-            security_groups = [
-                "${aws_security_group.server.id}",
-                "${aws_security_group.bastion.id}",
-            ]
-            self = false
-        }
-    ]
-    egress = [
-        {
-            cidr_blocks = ["0.0.0.0/0"]
-            description = "allow all outbound"
-            from_port = 0
-            to_port = 0
-            ipv6_cidr_blocks = []
-            prefix_list_ids = []
-            protocol = -1
-            security_groups = []
-            self = false
-        }
-    ]
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "private-server-sg"
+    ManagedBy   = "aaron"
+    Environment = var.environment
+  }
 }

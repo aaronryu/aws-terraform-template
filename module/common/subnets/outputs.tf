@@ -1,17 +1,16 @@
 
-output "pub_sub_0_id" {
-  value = "${aws_subnet.public_subnet_0.id}"
+output "public_subnet_ids" {
+  description = "ids of public subnets"
+  value = [
+    aws_subnet.public_subnet_1.id,
+    aws_subnet.public_subnet_2.id,
+  ]
 }
 
-output "pub_sub_1_id" {
-  value = "${aws_subnet.public_subnet_1.id}"
+output "private_subnet_ids" {
+  description = "ids of private subnets"
+  value = [
+    aws_subnet.private_subnet_1.id,
+    aws_subnet.private_subnet_2.id,
+  ]
 }
-
-output "pri_sub_0_id" {
-  value = "${aws_subnet.private_subnet_0.id}"
-}
-
-output "pri_sub_1_id" {
-  value = "${aws_subnet.private_subnet_1.id}"
-}
-
