@@ -5,9 +5,10 @@ module "vpc" {
 }
 
 module "subnets" {
-  source      = "../common/subnets"
-  vpc_id      = module.vpc.vpc_id
-  environment = var.environment
+  source          = "../common/subnets"
+  vpc_id          = module.vpc.vpc_id
+  database_vpc_id = module.vpc.database_vpc_id
+  environment     = var.environment
 }
 
 module "igw" {
@@ -24,11 +25,13 @@ module "route_table" {
 }
 
 module "route_table_association" {
-  source                 = "../common/route-tables-association"
-  environment            = var.environment
-  vpc_id                 = module.vpc.vpc_id
-  public_subnet_ids      = module.subnets.public_subnet_ids
-  public_route_table_id  = module.route_table.public_route_table_id
-  private_subnet_ids     = module.subnets.private_subnet_ids
-  private_route_table_id = module.route_table.private_route_table_id
+  source                  = "../common/route-tables-association"
+  environment             = var.environment
+  vpc_id                  = module.vpc.vpc_id
+  public_subnet_ids       = module.subnets.public_subnet_ids
+  public_route_table_id   = module.route_table.public_route_table_id
+  private_subnet_ids      = module.subnets.private_subnet_ids
+  private_route_table_id  = module.route_table.private_route_table_id
+  database_subnet_ids     = module.subnets.database_subnet_ids
+  database_route_table_id = module.route_table.database_route_table_id
 }

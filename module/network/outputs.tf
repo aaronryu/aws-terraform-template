@@ -28,3 +28,8 @@ output "private_route_table_id" {
   description = "id of private route table for private subnets"
   value       = module.route_table.private_route_table_id
 }
+
+output "database_subnet_ids" {
+  description = "ids of database subnets"
+  value       = module.subnets.database_subnet_ids
+}
