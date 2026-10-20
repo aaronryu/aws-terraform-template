@@ -28,3 +28,13 @@ variable "private_subnet_ids" {
   type        = list(string)
   description = "ids of private subnet"
 }
+
+variable "database_route_table_id" {
+  type        = string
+  description = "id of database route table"
+}
+
+variable "database_subnet_ids" {
+  type        = list(string)
+  description = "ids of database subnet"
+}

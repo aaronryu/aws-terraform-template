@@ -23,3 +23,14 @@ resource "aws_route_table" "private_route_table" {
     Environment = var.environment
   }
 }
+
+# DB 서브넷용 라우팅 테이블: VPC 내부(local) 라우트만 존재하고 인터넷(0.0.0.0/0) 경로는 없다.
+resource "aws_route_table" "database_route_table" {
+  vpc_id = var.vpc_id
+
+  tags = {
+    Name        = "database-route-table"
+    ManagedBy   = "aaron"
+    Environment = var.environment
+  }
+}
