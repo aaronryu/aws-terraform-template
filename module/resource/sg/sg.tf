@@ -27,7 +27,7 @@ resource "aws_security_group" "bastion_sg" {
   }
 }
 
-# 2. NAT Instance SG: Private Subnet 대역에서 오는 모든 트래픽 허용
+# 2. NAT Instance SG: Private Subnet 대역에서 오는 모든 트래픽 허용 + AWS EC2 Instance Connect 위해 22 허용
 resource "aws_security_group" "nat_instance_sg" {
   name        = "nat-instance-sg"
   description = "Security Group for NAT Instance"
@@ -86,6 +86,38 @@ resource "aws_security_group" "private_server_sg" {
 
   tags = {
     Name        = "private-server-sg"
+    ManagedBy   = "aaron"
+    Environment = var.environment
+  }
+}
+
+# 4. Database SG: Private EC2 의 SG 에서 오는 PostgreSQL(5432) 연결만 허용
+#    - IP 대역이 아닌 "SG 를 소스로" 지정하면, EC2 가 늘어나거나 IP 가 바뀌어도 규칙을 고칠 필요가 없다.
+#    - 추가로 개발자 로컬에서 DBeaver 같은 클라이언트를 통해 운영 데이터베이스에 접근할 수 있도록 Bastion 에 대해서 추가 허용
+#    - DB 는 먼저 외부로 연결을 맺을 일이 없으므로 egress 규칙을 두지 않는다.
+resource "aws_security_group" "database_sg" {
+  name        = "database-sg"
+  description = "Security Group for PostgreSQL (RDS)"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description     = "PostgreSQL from Private Server Security Group"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.private_server_sg.id]
+  }
+
+  ingress {
+    description     = "PostgreSQL from Bastion Security Group"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.bastion_sg.id] # Bastion SG에 대해서만 허용
+  }
+
+  tags = {
+    Name        = "database-sg"
     ManagedBy   = "aaron"
     Environment = var.environment
   }
