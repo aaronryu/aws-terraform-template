@@ -4,10 +4,11 @@ module "network" {
 }
 
 module "security_groups" {
-  source      = "./module/resource/sg"
-  vpc_id      = module.network.vpc_id
-  vpc_cidr    = module.network.vpc_cidr
-  environment = "development"
+  source         = "./module/resource/sg"
+  vpc_id         = module.network.vpc_id
+  vpc_cidr       = module.network.vpc_cidr
+  container_port = var.container_port
+  environment    = "development"
 }
 
 module "ec2_instances" {
