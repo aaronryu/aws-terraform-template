@@ -38,3 +38,13 @@ output "app_config" {
     APP_AWS_SECRET_ACCESS_KEY = module.s3.app_secret_access_key
   }
 }
+
+# ---- 2차: GitHub Actions 워크플로우(examples/github-actions/deploy-to-ecs.yml)에 넣을 값 ----
+
+output "ecr_repository_name" {
+  value = module.ecr.repository_name
+}
+
+output "ecr_repository_url" {
+  value = module.ecr.repository_url
+}
