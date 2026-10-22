@@ -32,6 +32,15 @@ resource "aws_ecs_task_definition" "app" {
       image        = "${var.ecr_repository_url}:placeholder" # 실제 존재하지않는 이미지 -> 실제 이미지는 :latest 태그명
       essential    = true
       portMappings = [{ containerPort = var.container_port, protocol = "tcp" }]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.app.name
+          # "awslogs-create-group"  = true # 따로 이 옵션이 필요없는것이 같은 디렉토리 내 log.tf 파일을 통해 로그 그룹 생성 후 그 그룹명을 그대로 넣었기 때문
+          "awslogs-region"        = "ap-northeast-2"
+          "awslogs-stream-prefix" = "ecs"
+        }
+      }
     }
   ])
 

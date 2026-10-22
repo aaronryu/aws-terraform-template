@@ -41,3 +41,9 @@ variable "memory" {
   description = "fargate task memory in MiB"
   default     = 1024
 }
+
+variable "log_retention_days" {
+  type        = number
+  description = "days to keep container logs in CloudWatch Logs"
+  default     = 0 # 만기 없음
+}
