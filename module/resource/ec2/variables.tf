@@ -5,6 +5,11 @@ variable "environment" {
   default     = "development"
 }
 
+variable "project_name" {
+  type        = string
+  description = "prefix of resource names"
+}
+
 variable "vpc_id" {
   type        = string
   description = "id of vpc"
