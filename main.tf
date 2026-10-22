@@ -11,6 +11,15 @@ module "security_groups" {
   environment    = "development"
 }
 
+# [1차] RDS(PostgreSQL): 데이터베이스 전용 사설 서브넷에 배치, Private EC2 의 SG 에서만 접근 가능
+module "rds" {
+  source              = "./module/resource/rds"
+  project_name        = var.project_name
+  database_subnet_ids = module.network.database_subnet_ids
+  database_sg_id      = module.security_groups.database_sg_id
+  environment         = "development"
+}
+
 module "ec2_instances" {
   source                 = "./module/resource/ec2"
   vpc_id                 = module.network.vpc_id

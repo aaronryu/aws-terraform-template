@@ -11,3 +11,7 @@ output "private_server_private_ip" {
 output "ssh_to_private_server" {
   value = "ssh -i local-to-private.pem -o ProxyCommand=\"ssh -i local-to-bastion.pem -W %h:%p ec2-user@${module.ec2_instances.bastion_public_ip}\" ec2-user@${module.ec2_instances.private_server_private_ip}"
 }
+
+output "rds_endpoint" {
+  value = module.rds.address
+}
