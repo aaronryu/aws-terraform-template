@@ -14,3 +14,8 @@ variable "vpc_cidr" {
   type        = string
   description = "cidr of vpc"
 }
+
+variable "container_port" {
+  type        = number
+  description = "port the container listens on"
+}

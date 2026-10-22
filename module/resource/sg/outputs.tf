@@ -14,3 +14,7 @@ output "private_server_sg_id" {
 output "database_sg_id" {
   value = aws_security_group.database_sg.id
 }
+
+output "ecs_task_sg_id" {
+  value = aws_security_group.ecs_task_sg.id
+}
