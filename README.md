@@ -17,6 +17,7 @@ module/network                # 네트워크 부품을 묶은 모듈
 module/resource/sg            # 보안 그룹 모음
 module/resource/ec2           # Bastion, NAT, Private EC2 (+ EC2 용 IAM 역할)
 module/resource/rds           # [1차] DB 서브넷 그룹 + PostgreSQL
+module/resource/s3            # [1차] 서비스용 S3 버킷
 ```
 
 ## 1차: RDS(PostgreSQL) + S3
@@ -75,7 +76,7 @@ terraform output -raw ssh_to_private_server
 ### 정리
 
 ```bash
-terraform destroy      # 실습용 설정이라 RDS 가 남아 있어도 삭제됩니다.
+terraform destroy      # 실습용 설정이라 RDS/S3 가 남아 있어도 삭제됩니다.
 ```
 
 ## 비용 참고 (서울 리전, 대략)

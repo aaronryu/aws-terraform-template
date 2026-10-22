@@ -11,6 +11,14 @@ module "security_groups" {
   environment    = "development"
 }
 
+# [1차] S3: 공개 읽기 + CORS 버킷, 그리고 앱(Spring Boot)이 SDK 로 쓸 IAM 사용자 액세스 키
+module "s3" {
+  source               = "./module/resource/s3"
+  project_name         = var.project_name
+  cors_allowed_origins = var.cors_allowed_origins
+  environment          = "development"
+}
+
 # [1차] RDS(PostgreSQL): 데이터베이스 전용 사설 서브넷에 배치, Private EC2 의 SG 에서만 접근 가능
 module "rds" {
   source              = "./module/resource/rds"
