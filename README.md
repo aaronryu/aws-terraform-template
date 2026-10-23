@@ -6,7 +6,8 @@
 | ------- | ---------------------------- | -------------------------------------------------------------------------- |
 | 0차     | `aws-vpc-nat-and-bastion`    | VPC, IGW, 공개/사설 서브넷, NAT 인스턴스, Bastion, Private EC2             |
 | 1차     | `aws-rds-s3`                 | DB 전용 서브넷, RDS(PostgreSQL), S3, EC2 → RDS/S3 연결(SG, IAM)            |
-| **2차** | `aws-ecr-ecs-github-actions` | ECR, ECS(Fargate) 단일 컨테이너, GitHub Actions 로 이미지 빌드/배포 (OIDC) |
+| 2차     | `aws-ecr-ecs-github-actions` | ECR, ECS(Fargate) 단일 컨테이너, GitHub Actions 로 이미지 빌드/배포 (OIDC) |
+| **3차** | `aws-cloudwatch-sns`         | ECS 로그(CloudWatch Logs), CPU/메모리/ERROR 로그 알람, SNS 이메일 알림     |
 
 ## 디렉터리 구조
 
@@ -21,6 +22,8 @@ module/resource/rds           # [1차] DB 서브넷 그룹 + PostgreSQL
 module/resource/s3            # [1차] 서비스용 S3 버킷
 module/resource/ecr           # [2차] 도커 이미지 저장소
 module/resource/ecs           # [2차] 클러스터, 태스크 정의, 서비스, ECS 용 IAM 역할
+module/resource/monitoring    # [3차] SNS 토픽/구독, CloudWatch 알람, 로그 메트릭 필터
+                              #       (로그 그룹 자체는 module/resource/ecs/logs.tf)
 terraform.tfvars.example      # 입력값 예시 (복사해서 terraform.tfvars 로)
 ```
 
@@ -148,6 +151,53 @@ curl http://<태스크 사설 IP>:8080/
 - `terraform destroy` 시 ECR 이미지가 남아 있어도 삭제됩니다. (`force_delete`)
 - 계정에 GitHub OIDC 공급자가 이미 있으면 `already exists` 오류가 납니다 → `github_oidc_provider_arn` 에 기존 ARN 을 지정하세요.
 
+## 3차: CloudWatch 로그/메트릭 + SNS 알람
+
+```
+ ECS 컨테이너 ──stdout/stderr──▶ CloudWatch Logs (/ecs/...-app)
+      │                                  │ 메트릭 필터("ERROR" → AppErrorCount)
+      │ AWS/ECS 메트릭 (CPU, 메모리)        ▼
+      └──────────────▶ CloudWatch 알람 (임계값 초과) ──▶ SNS 토픽 ──▶ 이메일
+```
+
+핵심 포인트
+
+- **로그**: 태스크 정의의 `logConfiguration(awslogs)` 가 컨테이너 로그를 로그 그룹으로 보냅니다. 로그 그룹을 직접 만들어 보존 기간(기본 7일)을 정합니다. 태스크 정의가 바뀌므로 `apply` 하면 ECS 서비스가 새 태스크로 교체됩니다.
+- **메트릭**: ECS 서비스의 CPU/메모리 사용률(`AWS/ECS`)은 추가 설정 없이 1분마다 수집됩니다. 사용률은 _태스크에 할당한 값 대비 %_ 라서 2차에서 정한 `ecs_task_cpu/memory` 가 적절했는지 판단하는 근거가 됩니다.
+- **알람**: 1분 평균을 3번 연속 80% 이상이면 `ALARM`, 데이터가 없으면(배포 중 등) 정상으로 취급합니다. 상태가 바뀔 때(`ALARM`, `OK`) SNS 로 알립니다.
+- **로그 → 메트릭 → 알람**: 로그에 `ERROR` 가 찍힐 때마다 `AppErrorCount` 를 1씩 올리고, 1분에 1건 이상이면 알람을 울립니다.
+- **SNS 이메일 구독은 수동 확인이 필요**합니다. `apply` 후 도착하는 _Subscription Confirmation_ 메일의 **Confirm subscription** 을 눌러야 알림이 옵니다.
+- ECS 태스크/컨테이너 단위의 세부 메트릭(실행 중 태스크 수 등)이 필요하면 클러스터의 Container Insights 를 켜야 하지만, 유료이므로 이 템플릿에서는 켜지 않았습니다.
+
+### 적용
+
+```bash
+# terraform.tfvars 에 alarm_email 추가
+terraform apply
+```
+
+### 확인
+
+```bash
+# 1) 로그: 실시간으로 보기 (AWS CLI v2)
+aws logs tail $(terraform output -raw ecs_log_group_name) --follow
+
+# 2) 알람 → SNS → 메일 경로 테스트: 실제 부하 없이 알람 상태를 강제로 바꿔 본다
+aws cloudwatch set-alarm-state --alarm-name $(terraform output -raw cpu_alarm_name) \
+  --state-value ALARM --state-reason "manual test"
+#  → 메일이 오고, 잠시 뒤 실제 상태(OK)로 돌아오면서 OK 메일이 한 번 더 온다
+
+# 3) ERROR 로그 → 메트릭 → 알람 경로 테스트 (앱 코드를 고치지 않고 로그 한 줄을 직접 넣는다)
+LOG_GROUP=$(terraform output -raw ecs_log_group_name)
+aws logs create-log-stream --log-group-name $LOG_GROUP --log-stream-name manual-test
+aws logs put-log-events --log-group-name $LOG_GROUP --log-stream-name manual-test \
+  --log-events timestamp=$(($(date +%s)*1000)),message="ERROR manual test"
+#  → 1~2분 안에 error 알람이 울리고 메일이 온다
+```
+
+- 진짜 CPU 알람을 보고 싶다면 `main.tf` 의 `module "monitoring"` 에 `cpu_threshold_percent = 1` 처럼 임계값을 낮춰서 `apply` 해 보세요.
+- CloudWatch 콘솔 → 메트릭 → `ECS` → `ClusterName, ServiceName` 에서 `CPUUtilization`, `MemoryUtilization` 의 *평균*과 *최대*를 같이 보면, 태스크 크기가 부족한지 넉넉한지 판단할 수 있습니다.
+
 ## 비용 참고 (서울 리전, 대략)
 
-t2.micro × 3 (Bastion, NAT, Private EC2) + RDS `db.t3.micro` + gp3 20GB + Fargate 태스크 1개(0.5 vCPU / 1GB, 켜져 있는 시간만큼). 실습 후에는 꼭 `terraform destroy` 하세요.
+t2.micro × 3 (Bastion, NAT, Private EC2) + RDS `db.t3.micro` + gp3 20GB + Fargate 태스크 1개(0.5 vCPU / 1GB, 켜져 있는 시간만큼) + CloudWatch(로그 수집/보관, 알람 3개). 실습 후에는 꼭 `terraform destroy` 하세요.

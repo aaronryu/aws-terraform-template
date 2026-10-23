@@ -60,3 +60,14 @@ module "ecs" {
   memory             = var.ecs_task_memory
   environment        = "development"
 }
+
+# [3차] CloudWatch 알람 + SNS 이메일 알림: ECS 의 CPU/메모리 사용률, ERROR 로그
+module "monitoring" {
+  source         = "./module/resource/monitoring"
+  project_name   = var.project_name
+  alarm_email    = var.alarm_email
+  cluster_name   = module.ecs.cluster_name
+  service_name   = module.ecs.service_name
+  log_group_name = module.ecs.log_group_name
+  environment    = "development"
+}
