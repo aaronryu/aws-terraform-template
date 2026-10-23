@@ -20,20 +20,39 @@ output "s3_bucket_name" {
   value = module.s3.bucket_name
 }
 
-# ---- GitHub Secrets 에 등록할 값 (비밀번호 포함이라 sensitive: 평소엔 <sensitive> 로 가려짐) ----
-#   terraform output -json app_config
+# ---- Ⓐ GitHub Secrets 에 등록할 Variables 값 ----
+#   terraform output -json github_actions_vars
+# 워크플로우가 이 키 이름 그대로 vars.<KEY> 로 읽어 컨테이너의 런타임 환경 변수로 넣는다.
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+output "github_actions_vars" {
+  value = {
+    AWS_REGION             = data.aws_region.current.region
+    AWS_ACCOUNT_ID         = data.aws_caller_identity.current.account_id
+    AWS_S3_BUCKET          = module.s3.bucket_name
+    ECR_REPOSITORY         = module.ecr.repository_name
+    ECS_CLUSTER            = module.ecs.cluster_name
+    ECS_SERVICE            = module.ecs.service_name
+    ECS_TASKDEF            = module.ecs.task_definition
+    ECS_CONTAINER          = module.ecs.container_name
+    ECS_EXECUTION_ROLE_ARN = module.ecs.execution_role_arn
+    ECS_LOG_GROUP          = module.ecs.log_group_name
+  }
+}
+
+# ---- Ⓑ GitHub Secrets 에 등록할 Secrets 값 (비밀번호 포함이라 sensitive: 평소엔 <sensitive> 로 가려짐) ----
+#   terraform output -json github_actions_secrets
 # 워크플로우가 이 키 이름 그대로 secrets.<KEY> 로 읽어 컨테이너의 런타임 환경 변수로 넣는다.
-output "app_config" {
+output "github_actions_secrets" {
   sensitive = true
   value = {
-    DB_HOST     = module.rds.address
-    DB_PORT     = tostring(module.rds.port)
-    DB_NAME     = module.rds.db_name
-    DB_USERNAME = module.rds.username
-    DB_PASSWORD = module.rds.password
-    S3_BUCKET   = module.s3.bucket_name
-    # AWS_ 가 아닌 APP_AWS_ 접두사: 워크플로우가 AWS 에 접속할 때 쓰는 자격증명(OIDC)과 이름이 겹치지 않게 한다.
-    # 워크플로우가 컨테이너의 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY 로 바꿔서 넣는다.
+    # 스프링 spring.datasource.* 가 읽는 이름 그대로
+    DATASOURCE_URL      = "jdbc:postgresql://${module.rds.address}:${module.rds.port}/${module.rds.db_name}"
+    DATASOURCE_USERNAME = module.rds.username
+    DATASOURCE_PASSWORD = module.rds.password
+    # AWS_ 가 아닌 APP_AWS_ 접두사: Github Actions 워크플로우가 배포할 때 쓰는 자격증명(secrets.AWS_ACCESS_KEY_ID)과 이름이 겹치지 않게 한다.
+    # 워크플로우가 태스크 정의 렌더링 시 Spring Boot 컨테이너의 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY 값으로 넣는다.
     APP_AWS_ACCESS_KEY_ID     = module.s3.app_access_key_id
     APP_AWS_SECRET_ACCESS_KEY = module.s3.app_secret_access_key
   }

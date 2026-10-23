@@ -6,11 +6,21 @@ resource "aws_security_group" "bastion_sg" {
   vpc_id      = var.vpc_id
 
   ingress {
-    description = "SSH from anywhere"
+    # description = "SSH from anywhere"
+    description = "SSH from AWS Console Instance Connect"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    # cidr_blocks = ["0.0.0.0/0"]
+    prefix_list_ids = ["pl-00ec8fd779e5b4175"]
+  }
+
+  ingress {
+    description = "SSH from developer IPs (house etc)"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = var.ips_for_develop_purpose
   }
 
   egress {
@@ -34,11 +44,13 @@ resource "aws_security_group" "nat_instance_sg" {
   vpc_id      = var.vpc_id
 
   ingress {
-    description = "SSH from anywhere"
+    # description = "SSH from anywhere"
+    description = "SSH from AWS Console Instance Connect"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    # cidr_blocks = ["0.0.0.0/0"]
+    prefix_list_ids = ["pl-00ec8fd779e5b4175"]
   }
 
   ingress {

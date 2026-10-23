@@ -4,11 +4,12 @@ module "network" {
 }
 
 module "security_groups" {
-  source         = "./module/resource/sg"
-  vpc_id         = module.network.vpc_id
-  vpc_cidr       = module.network.vpc_cidr
-  container_port = var.container_port
-  environment    = "development"
+  source                  = "./module/resource/sg"
+  vpc_id                  = module.network.vpc_id
+  vpc_cidr                = module.network.vpc_cidr
+  container_port          = var.container_port
+  ips_for_develop_purpose = var.ips_for_develop_purpose
+  environment             = "development"
 }
 
 # [1차] S3: 서비스가 사용할 파일 저장소

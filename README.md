@@ -71,14 +71,37 @@ terraform apply        # RDS 생성에 5~10분 걸립니다. Private EC2 는 RDS
 terraform apply 완료 후
 
 ```bash
-# 0) GitHub Secrets 에 등록 - 아래 app_config 내에는 AWS_ACCESS_KEY_ID, DATASOURCE_PASSWORD 등이 들어간다
-terraform output -json app_config
+# 0.1) GitHub Secrets 에 수동 등록
+# - 아래 github_actions_vars 내에는 ECS_CLUSTER, ECS_SERVICE, ECS_TASKDEF 등이 들어간다
+# - 아래 github_actions_secrets 내에는 AWS_ACCESS_KEY_ID, DATASOURCE_PASSWORD 등이 들어간다
+terraform output -json github_actions_vars
+terraform output -json github_actions_secrets
+```
 
-# 1) Bastion 을 거쳐 Private EC2 접속 (출력된 명령을 그대로 복사)
-terraform output -raw ssh_to_private_server
+혹은 아래 명령어에서 OWNER/REPO 각각을 여러분들의것으로 채워넣고 (예, aaronryu/aws-spring-tutorial) 한번에 원격 Github Actions 내 업로드할 수 있다
+
+```bash
+# 0.2) GitHub Secrets 에 자동 등록
+brew install gh # GH (GitHub) CLI 사용을 위해 MacOS 기준 gh 설치를 해준다음
+gh auth login   # gh 설치가 완료됐다면 https://github.com/settings/tokens 페이지에 들어가서 GH CLI 호출을 위한 토큰 생성하여 이 값을 Paste your authentication token: 에 입력
+terraform output -json github_actions_vars | jq -r 'to_entries[] | "\(.key)\t\(.value)"' | while IFS=$'\t' read -r k v; do gh variable set "$k" --body "$v" -R OWNER/REPO; done
+terraform output -json github_actions_secrets | jq -r 'to_entries[] | "\(.key)\t\(.value)"' | while IFS=$'\t' read -r k v; do printf '%s' "$v" | gh secret set "$k" -R OWNER/REPO; done
+```
+
+아래 명령어에서 OWNER/REPO 각각을 여러분들의것으로 채워넣고 (예, aaronryu/aws-spring-tutorial) 호출하면 여러분들이 저장한 Variables / Secrets 가 잘 저장되어있는지 볼 수 있다
+GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens 이동하여 Permissions → Repository permissions 에 권한 추가 필요
+Secrets: Read and write 그리고 Variables: Read and write 권한을 설정해주면 된다
+
+```bash
+gh secret list -R OWNER/REPO
 ```
 
 - Private EC2 외의 곳(예: Bastion)에서 5432 접속이 **막히는 것**도 직접 확인해 보세요. (SG 의 역할)
+
+```bash
+# 1) Bastion 을 거쳐 Private EC2 접속 (출력된 명령을 그대로 복사)
+terraform output -raw ssh_to_private_server
+```
 
 ### 정리
 
