@@ -45,4 +45,7 @@ resource "aws_iam_role_policy_attachment" "execution" {
 }
 
 # 위 AmazonECSTaskExecutionRolePolicy 내에 이미 CloudWatch 로 로그를 전송하는 권한은 있는데
-# 3차에서 로그 적재할 CloudWatch 내 Log Group 존재하지 않을때 생성하기 위한 권한을 새로 추가해줄것
+# - awslogs-create-group: true 옵션 사용한다면 로그 적재할 CloudWatch 내 Log Group 존재하지 않을때 생성하기 위한 "logs:CreateLogGroup" 권한을 새로 추가 필요
+# - 만약 RDS 사용 시 manage_master_user_password: true 사용 시 비밀번호 자동 생성 후 AWS Secrets Manager 내부에 저장한다
+# - AWS ECS 구동을 시작할때 "secretsmanager:GetSecretValue" 권한을 넣어줘야 RDS 서비스가 직접 생성하여 AWS Secrets Manager 내 저장한 마스터 비밀번호를 가져올수있다
+#    - ECS 는 그렇게 가져온 RDS 마스터 비밀번호를 ExecutionRole 시점에 컨테이너 구동 환경(도커)에 주입하고 -> 그것은 다시 스프링 부트 실행변수에 넘겨져서 런타임 구동이 된다

@@ -6,7 +6,7 @@ data "aws_region" "current" {}
 resource "aws_s3_bucket" "this" {
   # ② 계정 지역 네임스페이스 적용 방식 < ① Global Namespace / ② Account Regional Namespace 중 2번 선택
   #   : 필수 접미사무(Account-Regional Namespace Suffix) 필요 {}-123456789012-ap-northeast-2-an
-  bucket           = "${var.project_name}-${var.environment}-${data.aws_caller_identity.current.account_id}-${data.aws_region.current.name}-an"
+  bucket           = "${var.project_name}-${var.environment}-${data.aws_caller_identity.current.account_id}-${data.aws_region.current.region}-an"
   bucket_namespace = "account-regional"
 
   # 실습용 설정: 객체가 남아 있어도 terraform destroy 로 삭제 가능

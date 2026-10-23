@@ -59,6 +59,14 @@ resource "aws_ecs_service" "app" {
   desired_count   = 0
   launch_type     = "FARGATE"
 
+  # 새 태스크가 계속 기동에 실패하면 배포를 FAILED 로 멈추는 설정
+  # - 어자피 재배포해도 실패하는 이미지 / 컨테이너인데 지속적으로 불필요한 재배포에 따른 비용낭비를 방지하기 위해 본 설정
+  #    - 직전 성공 배포로 되돌리는 설정은 껐다 (플레이스홀더 태스크 정의가 :placeholder 존재하지 않는 태그의 도커 이미지를 사용하기때문)
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = false
+  }
+
   network_configuration {
     subnets          = var.public_subnet_ids # 추후 Private Subnet 사용하여 ALB 붙이는것이 좋다 - 좀 더 현업에 맞는 설계
     security_groups  = [var.ecs_task_sg_id]

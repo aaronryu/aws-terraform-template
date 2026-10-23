@@ -77,6 +77,7 @@ resource "aws_security_group" "private_server_sg" {
     security_groups = [aws_security_group.bastion_sg.id] # Bastion SG에 대해서만 허용
   }
 
+  # ECR 이미지 Pull, CloudWatch 로그 전송, Secrets Manager 호출 등은 NAT 인스턴스를 거쳐 나간다.
   egress {
     from_port   = 0
     to_port     = 0
@@ -105,15 +106,16 @@ resource "aws_security_group" "ecs_task_sg" {
     to_port         = var.container_port
     protocol        = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-    # - 만약 ECS 태스크를 Private Subnet 내 둔다면 아래와 깉이 통로를 열어줘야하는데 
-    #   - 다만 ECS 가 FARGATE 서버리스 타입으로 구동되고있다면 애당초 컨테이너로 접근가능한 방법이 없다
+    # - 만약 ECS 태스크를 Private Subnet 내 둔다면 ALB 로부터 들어올 수 있게 아래와 같은 방법으로 통로를 열어줘야한다
     # security_groups = [
-    #   aws_security_group.bastion_sg.id,
-    #   aws_security_group.private_server_sg.id
+    #   aws_security_group.alb_sg.id
     # ]
+    # + Private Subnet 내 EC2 는 인스턴스라서 외부에서 Bastion 통해 들어올 수 있지만
+    # + Private Subnet 내 ECS 는 서버리스라서 외부에서 Bastion 통해 들어올 수 없다 (FARGATE 선택 시) - 그래서 컨테이너 로그 확인은 로그 그룹 설정을 통해서만 가능
+    #    - 그래서 Bastion 통한 SSH Tunneling 을 위한 22번 포트 ingress 오픈 설정은 따로 필요없다
   }
 
-  # ECR 이미지 pull, CloudWatch 로그 전송, Secrets Manager 호출 등은 NAT 인스턴스를 거쳐 나간다.
+  # 만약 ECS 도 EC2 처럼 Private Network 내 위치한다면 ECR 이미지 Pull, CloudWatch 로그 전송, Secrets Manager 호출 등은 NAT 인스턴스를 거쳐 나간다.
   egress {
     from_port   = 0
     to_port     = 0

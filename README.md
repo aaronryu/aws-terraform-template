@@ -2,12 +2,12 @@
 
 단일 서버 운영에 필요한 AWS 인프라를 Terraform 으로 단계별로 쌓아가는 실습 템플릿입니다.
 
-| 단계    | 브랜치                       | 추가되는 내용                                                              |
-| ------- | ---------------------------- | -------------------------------------------------------------------------- |
-| 0차     | `aws-vpc-nat-and-bastion`    | VPC, IGW, 공개/사설 서브넷, NAT 인스턴스, Bastion, Private EC2             |
-| 1차     | `aws-rds-s3`                 | DB 전용 서브넷, RDS(PostgreSQL), S3, EC2 → RDS/S3 연결(SG, IAM)            |
-| 2차     | `aws-ecr-ecs-github-actions` | ECR, ECS(Fargate) 단일 컨테이너, GitHub Actions 로 이미지 빌드/배포 (OIDC) |
-| **3차** | `aws-cloudwatch-sns`         | ECS 로그(CloudWatch Logs), CPU/메모리/ERROR 로그 알람, SNS 이메일 알림     |
+| 단계    | 브랜치                       | 추가되는 내용                                                          |
+| ------- | ---------------------------- | ---------------------------------------------------------------------- |
+| 0차     | `aws-vpc-nat-and-bastion`    | VPC, IGW, 공개/사설 서브넷, NAT 인스턴스, Bastion, Private EC2         |
+| 1차     | `aws-rds-s3`                 | DB 전용 서브넷, RDS(PostgreSQL), S3, EC2 → RDS/S3 연결(SG, IAM)        |
+| 2차     | `aws-ecr-ecs-github-actions` | ECR, ECS(Fargate) 단일 컨테이너                                        |
+| **3차** | `aws-cloudwatch-sns`         | ECS 로그(CloudWatch Logs), CPU/메모리/ERROR 로그 알람, SNS 이메일 알림 |
 
 ## 디렉터리 구조
 
@@ -89,13 +89,9 @@ terraform destroy      # 실습용 설정이라 RDS/S3 가 남아 있어도 삭�
 ## 2차: ECR + ECS(Fargate) + GitHub Actions
 
 ```
- GitHub (main push)
-      │  OIDC 토큰 → AWS IAM 역할(임시 자격증명)
-      ▼
- GitHub Actions ──docker push──▶ ECR ◀──이미지 pull── ECS Fargate 태스크 (사설 서브넷)
-      │                                                     │  │
-      └── ecs update-service (새 배포) ───────────────────────┘  ├─ 5432 ▶ RDS  (Secrets Manager 의 비밀번호 주입)
-                                                               └─ IAM 태스크 역할 ▶ S3
+ GitHub Actions ──docker push──▶ ECR ◀──이미지 pull── ECS Fargate 태스크 (공개 서브넷 Public Subnet)
+      │                                                     │
+      └── ecs update-service (새 배포) ───────────────────────┘
 ```
 
 핵심 포인트
@@ -162,7 +158,7 @@ curl http://<태스크 사설 IP>:8080/
 
 핵심 포인트
 
-- **로그**: 태스크 정의의 `logConfiguration(awslogs)` 가 컨테이너 로그를 로그 그룹으로 보냅니다. 로그 그룹을 직접 만들어 보존 기간(기본 7일)을 정합니다. 태스크 정의가 바뀌므로 `apply` 하면 ECS 서비스가 새 태스크로 교체됩니다.
+- **로그**: 태스크 정의의 `logConfiguration(awslogs)` 가 컨테이너 로그를 로그 그룹으로 보냅니다. 로그 그룹을 직접 만들어 보존 기간(0 = 무제한)을 정합니다. 태스크 정의가 바뀌므로 `apply` 하면 ECS 서비스가 새 태스크로 교체됩니다.
 - **메트릭**: ECS 서비스의 CPU/메모리 사용률(`AWS/ECS`)은 추가 설정 없이 1분마다 수집됩니다. 사용률은 _태스크에 할당한 값 대비 %_ 라서 2차에서 정한 `ecs_task_cpu/memory` 가 적절했는지 판단하는 근거가 됩니다.
 - **알람**: 1분 평균을 3번 연속 80% 이상이면 `ALARM`, 데이터가 없으면(배포 중 등) 정상으로 취급합니다. 상태가 바뀔 때(`ALARM`, `OK`) SNS 로 알립니다.
 - **로그 → 메트릭 → 알람**: 로그에 `ERROR` 가 찍힐 때마다 `AppErrorCount` 를 1씩 올리고, 1분에 1건 이상이면 알람을 울립니다.

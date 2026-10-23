@@ -15,6 +15,12 @@ resource "aws_db_subnet_group" "this" {
   }
 }
 
+resource "random_password" "db" {
+  length           = 20
+  special          = true
+  override_special = "!#$%^&*()-_=+" # RDS 금지 문자 / @ " 공백 제외
+}
+
 # 2. PostgreSQL 인스턴스 (단일 AZ, 데이터베이스 서브넷 중 availability_zone 에 해당하는 서브넷에 배치)
 resource "aws_db_instance" "this" {
   identifier        = "${var.project_name}-${var.environment}-postgres"
@@ -28,9 +34,12 @@ resource "aws_db_instance" "this" {
 
   db_name  = var.db_name
   username = var.db_username
-  # 비밀번호를 코드/tfvars 에 적지 않고, RDS 가 Secrets Manager 에 직접 생성/보관하게 한다.
+  password = random_password.db.result
+  # 비밀번호를 코드/tfvars 에 적지 않고, RDS 가 Secrets Manager 에 직접 생성/보관하게 하는 방법
   # (JSON 형태 {"username": "...", "password": "..."} 로 저장됨)
-  manage_master_user_password = true
+  # manage_master_user_password = true
+  # 이렇게 설정하면 좋은것은 Github Actions 내 Taskdef 파일 만들때 비밀번호 주입없이 AWS Secrets Manager 비밀번호값 ARN 그대로 사용
+  # 단점은 DBeaver 같은 클라이언트 통해 RDS 접속 불가
 
   db_subnet_group_name   = aws_db_subnet_group.this.name
   vpc_security_group_ids = [var.database_sg_id]
