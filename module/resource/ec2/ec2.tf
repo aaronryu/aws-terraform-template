@@ -84,6 +84,13 @@ resource "aws_instance" "private_server" {
   key_name                    = aws_key_pair.private_server.key_name
   associate_public_ip_address = false # Private 서브넷이므로 Public IP 없음
 
+  # [방식 B - IAM ROLE] 인스턴스 프로파일 사용 시 주석 해제 - 인스턴스 재생성 없이 반영된다
+  # iam_instance_profile = aws_iam_instance_profile.private_server.name
+  # metadata_options {
+  #   http_tokens                 = "required" # IMDSv2 강제
+  #   http_put_response_hop_limit = 2          # Docker 브리지 네트워크(1홉 추가)를 거친 컨테이너까지 IMDS 응답 전달
+  # }
+
   lifecycle { ignore_changes = [ami] }
   tags = {
     Name        = "${var.project_name}-${var.environment}-private-server"

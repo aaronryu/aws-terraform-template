@@ -47,3 +47,21 @@ module "elb" {
   project_name         = var.project_name
   environment          = var.environment
 }
+
+# S3: EC2 내 스프링 어플리케이션이 사용할 파일 저장소 - 위에서 배포된 ALB 도메인명을 그대로 호스트로
+module "s3" {
+  source               = "./module/resource/s3"
+  project_name         = var.project_name
+  environment          = var.environment
+  cors_allowed_methods = var.cors_allowed_methods
+  cors_allowed_origins = flatten([
+    var.cors_allowed_origins,
+    "http://${module.elb.alb_dns_name}",
+    "https://${module.elb.alb_dns_name}",
+  ])
+  app_user_name = module.ec2_instances.app_user_name # [방식 A - IAM USER] 버킷 권한을 붙일 스프링 앱용 IAM 사용자
+  # app_role_names       = {                         # [방식 B - IAM ROLE] 인스턴스 프로파일 사용 시 주석 해제
+  #   ec2 = module.ec2_instances.private_server_role_name
+  #   # ecs = module.ecs.task_role_name # 나중에 ECS 붙일 때 한 줄 추가
+  # }
+}

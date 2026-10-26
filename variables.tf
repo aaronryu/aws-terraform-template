@@ -21,3 +21,15 @@ variable "target_instance_port" {
   description = "port the container listens on"
   default     = 8080
 }
+
+variable "cors_allowed_origins" {
+  type        = list(string)
+  description = "web page origins allowed to call the S3 bucket from the browser, e.g. [\"https://www.example.com\"]"
+  default     = ["http://localhost:8080"]
+}
+
+variable "cors_allowed_methods" {
+  type        = list(string)
+  description = "HTTP methods allowed by CORS. add PUT when the browser uploads directly with a presigned URL"
+  default     = ["GET", "HEAD"]
+}

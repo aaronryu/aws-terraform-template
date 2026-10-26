@@ -44,6 +44,20 @@ output "ssh_tunnel_to_rds" {
   value = "ssh -i local-to-bastion.pem -N -L 25432:${module.rds.address}:${module.rds.port} ec2-user@${module.ec2_instances.bastion_public_ip}"
 }
 
+# Ⓐ GitHub Variables 에 등록할 Variables 값
+#   - 명령어 입력 시 값들 일괄 출력: terraform output -json github_actions_vars
+#   - Github Actions 워크플로우가 GitHub Variables 내 저장된 이 키 이름 그대로 ${{ vars.<KEY> }} 로 읽어 컨테이너의 런타임 환경 변수로 넣는다.
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+output "github_actions_vars" {
+  value = {
+    AWS_REGION     = data.aws_region.current.region
+    AWS_ACCOUNT_ID = data.aws_caller_identity.current.account_id
+    AWS_S3_BUCKET  = module.s3.bucket_name
+  }
+}
+
 # Ⓑ GitHub Secrets 에 등록할 Secrets 값 (비밀번호 포함이라 sensitive: 평소엔 <sensitive> 로 가려짐)
 #   - 명령어 입력 시 값들 일괄 출력: terraform output -json github_actions_secrets
 #   - Github Actions 워크플로우가 GitHub Secrets 내 저장된 이 키 이름 그대로 ${{ secrets.<KEY> }} 로 읽어 컨테이너의 런타임 환경 변수로 넣는다.
@@ -57,5 +71,9 @@ output "github_actions_secrets" {
     DATASOURCE_URL      = "jdbc:postgresql://${module.rds.address}:${module.rds.port}/${module.rds.db_name}"
     DATASOURCE_USERNAME = module.rds.username
     DATASOURCE_PASSWORD = module.rds.password
+    # 일반적 AWS_ 가 아닌 APP_AWS_ 접두사가 붙은 키인 이유: Github Actions 워크플로우가 배포할 때 쓰는 AWS_ACCESS_KEY_ID 과 이름이 겹치지 않도록
+    # 워크플로우가 태스크 정의서 JSON 내 변수를 채울때 Spring Boot 컨테이너의 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY 설정변수명에 아래의 값을 주입해준다
+    APP_AWS_ACCESS_KEY_ID     = module.ec2_instances.app_access_key_id
+    APP_AWS_SECRET_ACCESS_KEY = module.ec2_instances.app_secret_access_key
   }
 }

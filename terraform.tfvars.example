@@ -11,3 +11,9 @@ ips_for_develop_purpose = [
   # "112.216.230.34/32", # Jibmusil IP
   "218.156.176.28/32",
 ]
+
+# S3 애 자바스크립트로 호출 가능한 도메인과 메서드명
+cors_allowed_methods = ["GET", "HEAD"]
+cors_allowed_origins = [
+  "http://localhost:8080"
+]

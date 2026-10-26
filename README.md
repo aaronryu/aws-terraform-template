@@ -7,6 +7,7 @@
 | 0차  | `base/aws-vpc-nat-and-bastion` | VPC, IGW, 공개/사설 서브넷, NAT 인스턴스, Bastion, Private EC2           |
 | 1차  | `add-on-base/1-aws-elb`        | ELB(L7-ALB) 연결하여 사설 서브넷 내 EC2 외부로 서비스 서빙               |
 | 2차  | `add-on-base/2-aws-rds-and-s3` | 데이터베이스 서버를 위한 보조 CIDR + DB 전용 서브넷 2개, RDS(PostgreSQL) |
+| 3차  | `add-on-base/2-aws-rds-and-s3` | S3 버킷(공개 읽기, CORS, 암호화) + 스프링 앱용 IAM 사용자/액세스 키      |
 
 ## 디렉터리 구조
 
@@ -19,6 +20,7 @@ module/resource/sg            # 보안 그룹 모음
 module/resource/ec2           # Bastion, NAT, Private EC2
 module/resource/elb           # [1차] ALB, 대상 그룹, 리스너
 module/resource/rds           # [2차] DB 서브넷 그룹 + PostgreSQL
+module/resource/s3            # [3차] S3 버킷 + 스프링 앱 사용자에게 붙이는 버킷 권한
 ```
 
 ## 0차: AWS VPC + SG + EC2 (Private 1 + Public 2)
@@ -243,6 +245,66 @@ terraform output -json github_actions_secrets
 terraform destroy      # 실습용 설정이라 skip_final_snapshot = true, 스냅샷 없이 삭제됩니다.
 ```
 
+## 3차: S3 + 스프링 앱용 IAM ← 파일 CRUD 실습 프로젝트 배포 가능
+
+```
+[브라우저]  ── GET 객체 (인증 없음) ─────────▶  S3 버킷   ← 버킷 정책 public_read (GetObject 만 공개)
+[브라우저]  ── fetch / XHR ───────────────▶  S3 버킷   ← CORS (허용 Origin: ALB 도메인, localhost)
+[스프링 앱] ── AWS SDK + 앱 사용자 액세스 키 ─▶  S3 버킷   ← IAM 사용자 정책 (이 버킷만 List/Get/Put/Delete)
+[스프링 앱] ── Presigned URL 발급 ─────────▶ [브라우저] ── 그 URL 로 직접 업로드/다운로드 ─▶ S3 버킷
+```
+
+핵심 포인트
+
+- **누가 / 무엇을 분리**: 스프링 앱용 IAM 사용자와 액세스 키는 `module/resource/ec2/iam.tf`(누가), 이 버킷에 대한 권한(`aws_iam_user_policy`)은 `module/resource/s3/iam.tf`(무엇을)에 둡니다. 권한은 **이 버킷 하나**에 대해서만 List / Get / Put / Delete 로 좁혀 두었습니다.
+- **공개 읽기는 버킷 정책으로만**: `public_read` 버킷 정책이 누구에게나 `GetObject` 만 허용합니다. 목록 조회, 업로드, 삭제는 공개되지 않습니다. ACL 로 공개하는 경로는 Public Access Block 으로 계속 막아 둡니다.
+- **CORS 는 접근 제어가 아닙니다**: 허용한 Origin 의 웹 페이지 JavaScript 가 버킷을 호출해도 된다고 _브라우저에게_ 알려 줄 뿐입니다. ALB 도메인(`http(s)://<alb_dns_name>`)과 `cors_allowed_origins` 가 자동으로 들어갑니다. 브라우저에서 Presigned URL 로 직접 업로드하려면 `cors_allowed_methods` 에 `PUT` 을 추가합니다.
+- **버킷 이름**: 계정·리전 네임스페이스(`account-regional`)를 써서 `<project>-<env>-<계정ID>-<리전>-an` 형태로 만들어 전 세계 이름 충돌을 피합니다.
+- **인스턴스 프로파일로 바꾸려면**: `module/resource/ec2/iam.tf` 의 [방식 B] 주석을 참고합니다. 액세스 키 없이 IMDS 의 임시 자격증명을 쓰며, Presigned URL 도 그대로 동작합니다. (단, URL 유효기간이 임시 자격증명 만료 시간, 보통 몇 시간을 넘지 못함)
+
+### 적용
+
+```bash
+terraform apply
+```
+
+### 확인
+
+```bash
+# 1) 스프링 앱에 넣을 값 확인 (GitHub Variables / Secrets 에 등록)
+terraform output -json github_actions_vars      # AWS_S3_BUCKET 등
+terraform output -json github_actions_secrets   # APP_AWS_ACCESS_KEY_ID / APP_AWS_SECRET_ACCESS_KEY 등
+
+# 2) 앱 사용자 키로 업로드 + 권한 범위 확인 (로컬에서, jq 필요: brew install jq)
+#    - ( ) 서브셸 안에서만 앱 사용자 키로 바꾼다 → 괄호가 끝나면 원래 셸(direnv 등으로 설정한 Terraform 용 키)은 그대로
+BUCKET=$(terraform output -json github_actions_vars | jq -r .AWS_S3_BUCKET)
+(
+  export AWS_ACCESS_KEY_ID=$(terraform output -json github_actions_secrets | jq -r .APP_AWS_ACCESS_KEY_ID)
+  export AWS_SECRET_ACCESS_KEY=$(terraform output -json github_actions_secrets | jq -r .APP_AWS_SECRET_ACCESS_KEY)
+  echo "hello s3" > hello.txt
+  aws s3 cp hello.txt "s3://$BUCKET/hello.txt"   # 이 버킷에는 업로드 가능 → 성공
+  aws s3 ls                                       # 전체 버킷 목록 조회는 권한 밖 → AccessDenied
+)
+
+# 3) 공개 URL 로 읽기: 버킷 정책(public_read) 덕분에 인증 없이 읽힌다
+curl "https://$BUCKET.s3.ap-northeast-2.amazonaws.com/hello.txt"
+unset BUCKET
+```
+
+- `export` 를 서브셸 `( )` 없이 바로 실행하면 그 터미널의 키가 앱 사용자 키로 덮어써져서, 이후 `terraform plan` 이 AccessDenied 로 실패합니다. 그렇게 됐다면 `direnv reload` (또는 키를 다시 설정) 하세요.
+
+이제 비로소 파일 CRUD 실습 프로젝트 배포가 가능해졌다 RDS, S3 모두 사용가능해졌기 때문
+
+- 과거 Github Actions 통해 스프링 배포했던것을 활용하여 직접 Github Actions 워크플로우를 작성해보자
+  - 예시 코드는 제공되지 않는다 : 아직은 ECR 사용하지 않고 Docker Hub 사용하여 업로드 후 배포
+    - 우리는 지금 이쯤에서 배포 실습하지않고 -> 다음 ECR, ECS 실습 후 그걸로 배포할것이다
+
+### 정리
+
+```bash
+terraform destroy      # 실습용 설정이라 force_destroy = true, 객체가 남아 있어도 버킷이 삭제됩니다.
+```
+
 ## 비용 참고 (서울 리전, 대략)
 
-t3.micro × 3 (Bastion, NAT, Private EC2) + [1차] ALB 1개(시간당 요금 + LCU 사용량) + [2차] RDS `db.t3.micro` + gp3 20GB. 실습 후에는 꼭 `terraform destroy` 하세요.
+t3.micro × 3 (Bastion, NAT, Private EC2) + [1차] ALB 1개(시간당 요금 + LCU 사용량) + [2차] RDS `db.t3.micro` + gp3 20GB + [3차] S3 (저장 용량 + 요청 수, 실습 수준이면 거의 0). 실습 후에는 꼭 `terraform destroy` 하세요.
