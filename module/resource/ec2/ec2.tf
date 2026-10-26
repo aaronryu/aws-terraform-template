@@ -7,7 +7,7 @@ data "aws_ssm_parameter" "amazon_linux_2023" {
 # 1. Bastion Instance (Public Subnet)
 resource "aws_instance" "bastion" {
   ami                         = data.aws_ssm_parameter.amazon_linux_2023.value
-  instance_type               = "t2.micro"
+  instance_type               = "t3.micro"
   subnet_id                   = var.public_subnet_ids[0]
   vpc_security_group_ids      = [var.bastion_sg_id]
   key_name                    = aws_key_pair.bastion.key_name
@@ -24,7 +24,7 @@ resource "aws_instance" "bastion" {
 # 2. NAT Instance (Public Subnet)
 resource "aws_instance" "nat" {
   ami                         = data.aws_ssm_parameter.amazon_linux_2023.value
-  instance_type               = "t2.micro"
+  instance_type               = "t3.micro"
   subnet_id                   = var.public_subnet_ids[0]
   vpc_security_group_ids      = [var.nat_instance_sg_id]
   associate_public_ip_address = true
@@ -73,7 +73,7 @@ resource "aws_route" "private_nat_route" {
 # 3. Private EC2 Instance (Private Subnet)
 resource "aws_instance" "private_server" {
   ami                         = data.aws_ssm_parameter.amazon_linux_2023.value
-  instance_type               = "t2.micro"
+  instance_type               = "t3.micro"
   subnet_id                   = var.private_subnet_ids[0]
   vpc_security_group_ids      = [var.private_server_sg_id]
   key_name                    = aws_key_pair.private_server.key_name

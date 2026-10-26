@@ -130,7 +130,7 @@ terraform destroy      # 실습용 설정이라 RDS/S3 가 남아 있어도 삭�
 
 - Fargate 라서 느린 것이 아니라 **태스크 정의에 적은 값만큼만** 컨테이너가 쓸 수 있습니다. 허용되는 조합은 `variables.tf` 주석 표를 참고하세요.
 - 증상으로 구분: 메모리 부족이면 태스크가 `Exit code 137 (OutOfMemoryError: Container killed...)` 로 반복 종료되고, CPU 부족이면 기동이 매우 느리거나 헬스체크 타임아웃이 납니다.
-- 이 템플릿은 이미지 pull 이 t2.micro **NAT 인스턴스**를 거치기 때문에, 이미지가 크면 시작이 느려질 수 있습니다.
+- 이 템플릿은 이미지 pull 이 t3.micro **NAT 인스턴스**를 거치기 때문에, 이미지가 크면 시작이 느려질 수 있습니다.
 
 ### 적용
 
@@ -218,4 +218,4 @@ aws logs put-log-events --log-group-name $LOG_GROUP --log-stream-name manual-tes
 
 ## 비용 참고 (서울 리전, 대략)
 
-t2.micro × 3 (Bastion, NAT, Private EC2) + RDS `db.t3.micro` + gp3 20GB + Fargate 태스크 1개(0.5 vCPU / 1GB, 켜져 있는 시간만큼) + CloudWatch(로그 수집/보관, 알람 3개). 실습 후에는 꼭 `terraform destroy` 하세요.
+t3.micro × 3 (Bastion, NAT, Private EC2) + RDS `db.t3.micro` + gp3 20GB + Fargate 태스크 1개(0.5 vCPU / 1GB, 켜져 있는 시간만큼) + CloudWatch(로그 수집/보관, 알람 3개). 실습 후에는 꼭 `terraform destroy` 하세요.

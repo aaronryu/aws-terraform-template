@@ -28,22 +28,22 @@ resource "aws_ecr_lifecycle_policy" "this" {
     rules = [
       {
         rulePriority = 1
-        description  = "태그 없는 이미지(덮어써진 이전 latest, 빌드 중간 산물)는 7일 뒤 삭제"
+        description  = "Re-run 등으로 태그를 잃은 이미지는 1일 뒤 삭제"
         selection = {
           tagStatus   = "untagged"
           countType   = "sinceImagePushed"
           countUnit   = "days"
-          countNumber = 7
+          countNumber = 1
         }
         action = { type = "expire" }
       },
       {
         rulePriority = 2
-        description  = "그 외 모든 이미지는 최근 20개만 유지 (롤백 대상)"
+        description  = "SHA 태그 이미지는 최근 10개만 유지 (= 최근 10번 배포까지 롤백 가능)"
         selection = {
-          tagStatus   = "any" # "any" 규칙은 반드시 가장 마지막(가장 큰 priority) 이어야 함
+          tagStatus   = "any"
           countType   = "imageCountMoreThan"
-          countNumber = 20
+          countNumber = 10
         }
         action = { type = "expire" }
       }
