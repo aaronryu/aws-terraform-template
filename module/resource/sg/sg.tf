@@ -112,6 +112,38 @@ resource "aws_security_group" "private_server_sg" {
   }
 }
 
+# 4. Database SG: Private EC2 의 SG 에서 오는 PostgreSQL(5432) 연결만 허용
+#    - IP 대역이 아닌 "SG 를 소스로" 지정하면, EC2 가 늘어나거나 IP 가 바뀌어도 규칙을 고칠 필요가 없다.
+#    - 추가로 개발자 로컬에서 DBeaver 같은 클라이언트를 통해 운영 데이터베이스에 접근할 수 있도록 Bastion 에 대해서 추가 허용
+#    - DB 는 먼저 외부로 연결을 맺을 일이 없으므로 egress 규칙을 두지 않는다.
+resource "aws_security_group" "database_sg" {
+  name        = "database-sg"
+  description = "Security Group for PostgreSQL (RDS)"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description     = "PostgreSQL from Private Server Security Group"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.private_server_sg.id]
+  }
+
+  ingress {
+    description     = "PostgreSQL from Bastion Security Group"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.bastion_sg.id] # Bastion SG에 대해서만 허용
+  }
+
+  tags = {
+    Name        = "${var.project_name}-${var.environment}-database-sg"
+    ManagedBy   = "aaron"
+    Environment = var.environment
+  }
+}
+
 # 5. ALB SG: 인터넷(0.0.0.0/0)에서 HTTP(80) 허용
 #    - egress 를 private_server_sg 로 지정하면 서로를 참조하는 순환 의존이 생기므로 VPC 대역으로 연다
 resource "aws_security_group" "alb_sg" {

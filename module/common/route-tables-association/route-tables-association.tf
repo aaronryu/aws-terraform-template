@@ -10,3 +10,9 @@ resource "aws_route_table_association" "private_subnets" {
   subnet_id      = var.private_subnet_ids[count.index]
   route_table_id = var.private_route_table_id
 }
+
+resource "aws_route_table_association" "database_subnets" {
+  count          = length(var.database_subnet_ids)
+  subnet_id      = var.database_subnet_ids[count.index]
+  route_table_id = var.database_route_table_id
+}

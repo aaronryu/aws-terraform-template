@@ -31,3 +31,31 @@ output "alb_dns_name" {
 output "ec2_target_group_arn" {
   value = module.elb.ec2_target_group_arn
 }
+
+output "rds_dns_name" {
+  value = module.rds.address
+}
+
+# 로컬 DB 클라이언트(DBeaver 등)에서 Bastion 을 거쳐 RDS 로 접속하기 위한 터널 (프로젝트 루트에서 실행)
+# - 로컬 25432 포트 → Bastion → RDS 의 5432 포트로 터널을 연다 (-N: 원격 명령 없이 터널만 유지, 끄면 Ctrl+C)
+#   - 터미널에 다음 명령어 수행 > eval "$(terraform output -raw ssh_tunnel_to_rds)"
+# - 터널이 열린 상태에서 DBeaver 로 localhost:25432 접속
+output "ssh_tunnel_to_rds" {
+  value = "ssh -i local-to-bastion.pem -N -L 25432:${module.rds.address}:${module.rds.port} ec2-user@${module.ec2_instances.bastion_public_ip}"
+}
+
+# Ⓑ GitHub Secrets 에 등록할 Secrets 값 (비밀번호 포함이라 sensitive: 평소엔 <sensitive> 로 가려짐)
+#   - 명령어 입력 시 값들 일괄 출력: terraform output -json github_actions_secrets
+#   - Github Actions 워크플로우가 GitHub Secrets 내 저장된 이 키 이름 그대로 ${{ secrets.<KEY> }} 로 읽어 컨테이너의 런타임 환경 변수로 넣는다.
+output "github_actions_secrets" {
+  sensitive = true
+  value = {
+    # * 주의 : Github Secrets 내에서 추후 ECR 업로드 / ECS 구동을 위해 필요한 IAM 사용자 계정의 Access Key / Secret Key 는 직접 Github 페이지에서 추가해야합니다
+    # - AWS_ACCESS_KEY_ID
+    # - AWS_SECRET_ACCESS_KEY
+    # 스프링 spring.datasource.* 가 읽는 이름 그대로
+    DATASOURCE_URL      = "jdbc:postgresql://${module.rds.address}:${module.rds.port}/${module.rds.db_name}"
+    DATASOURCE_USERNAME = module.rds.username
+    DATASOURCE_PASSWORD = module.rds.password
+  }
+}

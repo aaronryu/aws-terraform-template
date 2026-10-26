@@ -14,6 +14,11 @@ variable "private_route_table_id" {
   description = "id of private route table"
 }
 
+variable "database_route_table_id" {
+  type        = string
+  description = "id of database route table"
+}
+
 variable "public_subnet_ids" {
   type        = list(string)
   description = "ids of public subnet"
@@ -22,4 +27,9 @@ variable "public_subnet_ids" {
 variable "private_subnet_ids" {
   type        = list(string)
   description = "ids of private subnet"
+}
+
+variable "database_subnet_ids" {
+  type        = list(string)
+  description = "ids of database subnet"
 }

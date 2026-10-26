@@ -2,10 +2,11 @@
 
 단일 서버 운영에 필요한 AWS 인프라를 Terraform 으로 단계별로 쌓아가는 실습 템플릿입니다.
 
-| 단계 | 브랜치                         | 추가되는 내용                                                  |
-| ---- | ------------------------------ | -------------------------------------------------------------- |
-| 0차  | `base/aws-vpc-nat-and-bastion` | VPC, IGW, 공개/사설 서브넷, NAT 인스턴스, Bastion, Private EC2 |
-| 1차  | `add-on-base/1-aws-elb`        | ELB(L7-ALB) 연결하여 사설 서브넷 내 EC2 외부로 서비스 서빙     |
+| 단계 | 브랜치                         | 추가되는 내용                                                            |
+| ---- | ------------------------------ | ------------------------------------------------------------------------ |
+| 0차  | `base/aws-vpc-nat-and-bastion` | VPC, IGW, 공개/사설 서브넷, NAT 인스턴스, Bastion, Private EC2           |
+| 1차  | `add-on-base/1-aws-elb`        | ELB(L7-ALB) 연결하여 사설 서브넷 내 EC2 외부로 서비스 서빙               |
+| 2차  | `add-on-base/2-aws-rds-and-s3` | 데이터베이스 서버를 위한 보조 CIDR + DB 전용 서브넷 2개, RDS(PostgreSQL) |
 
 ## 디렉터리 구조
 
@@ -17,6 +18,7 @@ module/network                # 네트워크 부품을 묶은 모듈
 module/resource/sg            # 보안 그룹 모음
 module/resource/ec2           # Bastion, NAT, Private EC2
 module/resource/elb           # [1차] ALB, 대상 그룹, 리스너
+module/resource/rds           # [2차] DB 서브넷 그룹 + PostgreSQL
 ```
 
 ## 0차: AWS VPC + SG + EC2 (Private 1 + Public 2)
@@ -155,6 +157,92 @@ curl "http://$(terraform output -raw alb_dns_name)"
 terraform destroy
 ```
 
+## 2차: RDS(PostgreSQL)
+
+```
+                        사용자 (브라우저 / curl)
+                                 │ HTTP 80  http://<alb_dns_name>
+                                 │
+                              [ IGW ]
+                                 │
+ ┌───────────────────────────────┼─ VPC 10.0.0.0/24 + 보조 CIDR 10.1.0.0/24 ──┐
+ │  ap-northeast-2a                          ap-northeast-2b                  │
+ │ ┌─ 공개 서브넷 10.0.0.0/26 ───┼──────┐  ┌─ 공개 서브넷 10.0.0.64/26 ─────┐ │
+ │ │              ┌──────────────▼──────────────────────────┐               │ │
+ │ │              │ ALB (alb-sg)   리스너 HTTP:80           │               │ │
+ │ │ Bastion      │ AZ 마다 노드가 1개씩 (2a, 2b)           │               │ │
+ │ │ NAT          │                                         │               │ │
+ │ │              └──────────────┬──────────────────────────┘               │ │
+ │ └─────────────────────────────┼──────┘  └────────────────────────────────┘ │
+ │                               │ 대상 그룹 (instance, :8080)                │
+ │                               │                                            │
+ │ ┌─────────────────────────────▼──────┐  ┌────────────────────────────────┐ │
+ │ │ Private EC2 :8080                  │  │ (비어 있음)                    │ │
+ │ │ (private-server-sg)                │  │                                │ │
+ │ └────┬─ 사설 서브넷 10.0.0.128/26 ───┘  └─ 사설 서브넷 10.0.0.192/26 ────┘ │
+ │      │ 5432 (database-sg 가 허용)                                          │
+ │      │                                                                     │
+ │ ┌────▼───────────────────────────────┐  ┌────────────────────────────────┐ │
+ │ │ RDS PostgreSQL 16                  │  │ (비어 있음)                    │ │
+ │ │ (database-sg)                      │  │ Multi-AZ 를 켜면 대기 DB 자리  │ │
+ │ │ db.t3.micro, 단일 AZ               │  │                                │ │
+ │ └─ DB 서브넷 10.1.0.0/26 ────────────┘  └─ DB 서브넷 10.1.0.64/26 ───────┘ │
+ │ └────────────── DB 서브넷 그룹 (서로 다른 AZ 2개 필수) ──────────────────┘ │
+ │  DB 라우팅 테이블: local 경로만 (0.0.0.0/0 없음 = 인터넷 왕복 불가)        │
+ └────────────────────────────────────────────────────────────────────────────┘
+```
+
+핵심 포인트
+
+- **보조 CIDR**: 기본 VPC CIDR(`10.0.0.0/24`)은 /26 서브넷 4개로 이미 가득 차 있어서, `10.1.0.0/24` 를 VPC 에 추가로 연결해 DB 서브넷 2개(`10.1.0.0/26`, `10.1.0.64/26`)를 만들었습니다. (VPC 를 새로 만들 필요 없음)
+  - 바로 옆 대역인 `10.0.1.0/24` 는 쓸 수 없습니다. VPC 에 `10.0.0.0/15` 범위의 CIDR 이 있으면 `10.0.0.0/16` 범위는 보조 CIDR 로 붙일 수 없다는 [AWS 제한](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-cidr-blocks.html#add-cidr-block-restrictions) 때문에 `InvalidVpc.Range` 오류가 납니다.
+- **DB 서브넷 그룹**: RDS 는 `multi_az = false` 여도 서로 다른 AZ 의 서브넷이 2개 이상 들어 있는 서브넷 그룹을 요구합니다. 실제 인스턴스는 `ap-northeast-2a` 한 곳에만 만듭니다.
+- **인터넷 경로 없음**: DB 서브넷은 local 경로만 있는 전용 라우팅 테이블을 씁니다. `publicly_accessible = false` 와 함께, RDS 는 VPC 안에서만 접근할 수 있습니다.
+- **SG → SG 허용**: `database-sg` 는 IP 가 아니라 `private-server-sg` 와 `bastion-sg` 에서 오는 5432 만 허용합니다. ALB 나 인터넷에서는 닿지 않습니다.
+- **비밀번호**: `random_password` 로 만들어 RDS 에 넣고, `terraform output` 으로만 꺼냅니다. (state 파일에 평문으로 남으므로 state 는 Git 에 올리지 않는다)
+
+### 적용
+
+주의 : RDS 생성에 5~10분 걸린다 - 서버 구동 이후 문제가 생겼을때 첫 상태로 복귀하기 위한 백업본을 초기 서버 생성 시 만들기 때문에 오래 걸리는것
+
+```bash
+terraform apply
+```
+
+### 확인
+
+로컬 PC 의 DB 클라이언트(DBeaver 등)에서 Bastion 을 거쳐 RDS 에 접속합니다.
+
+```
+ 개발자 PC (DBeaver)                 공개 서브넷               DB 서브넷
+ localhost:25432 ──── SSH 터널 ────▶ Bastion ──── 5432 ────▶ RDS
+```
+
+첫번째 터미널에서 터널을 연다 (열려 있는 동안 출력 없이 대기)
+
+```bash
+eval "$(terraform output -raw ssh_tunnel_to_rds)"
+```
+
+```bash
+# 위 명령어는 실제 아래와 똑같이 수행되는것 (아래 명령어에 채워진 IP 주소는 예시)
+ssh -i local-to-bastion.pem -N -L 25432:example.ap-northeast-2.rds.amazonaws.com:5432 ec2-user@15.165.15.132
+```
+
+DBeaver 에서 Host `localhost`, Port `25432`, Database `appdb`, Username `appuser` 로 접속합니다. 접속을 위한 비밀번호 포함 정보는 아래로 확인합니다.
+
+```bash
+terraform output -json github_actions_secrets
+```
+
+- Private EC2 에서 직접 붙어 보고 싶다면, 0차의 방법으로 접속한 뒤 `psql -h $(terraform output -raw rds_dns_name) -U appuser -d appdb` 로 접속합니다. (`sudo dnf install -y postgresql16` 필요)
+
+### 정리
+
+```bash
+terraform destroy      # 실습용 설정이라 skip_final_snapshot = true, 스냅샷 없이 삭제됩니다.
+```
+
 ## 비용 참고 (서울 리전, 대략)
 
-t3.micro × 3 (Bastion, NAT, Private EC2) + [1차] ALB 1개(시간당 요금 + LCU 사용량). 실습 후에는 꼭 `terraform destroy` 하세요.
+t3.micro × 3 (Bastion, NAT, Private EC2) + [1차] ALB 1개(시간당 요금 + LCU 사용량) + [2차] RDS `db.t3.micro` + gp3 20GB. 실습 후에는 꼭 `terraform destroy` 하세요.
