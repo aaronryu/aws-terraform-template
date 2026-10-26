@@ -24,3 +24,9 @@ variable "ips_for_develop_purpose" {
   type        = list(string)
   description = "ssh from certain ips"
 }
+
+variable "app_port" {
+  type        = number
+  description = "port the private server listens on (alb forwards to this port)"
+  default     = 8080
+}

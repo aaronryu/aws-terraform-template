@@ -21,3 +21,13 @@ output "ssh_tunnel_to_private_server" {
 output "ssh_to_private_server" {
   value = "ssh -i local-to-private.pem -p 33322 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ec2-user@localhost"
 }
+
+# ALB 도입되고나서는 단일 도메인명으로 웹브라우저나 클라이언트로 접속하게 된다 - 재배포되어도 변하지않는다
+output "alb_dns_name" {
+  value = module.elb.alb_dns_name
+}
+
+# 대상 그룹 헬스체크 상태 확인용 > aws elbv2 describe-target-health --target-group-arn $(terraform output -raw ec2_target_group_arn)
+output "ec2_target_group_arn" {
+  value = module.elb.ec2_target_group_arn
+}

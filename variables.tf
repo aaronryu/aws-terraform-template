@@ -15,3 +15,9 @@ variable "ips_for_develop_purpose" {
   type        = list(string)
   description = "ssh from certain ips"
 }
+
+variable "target_instance_port" {
+  type        = number
+  description = "port the container listens on"
+  default     = 8080
+}

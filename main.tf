@@ -9,6 +9,7 @@ module "security_groups" {
   vpc_id                  = module.network.vpc_id
   vpc_cidr                = module.network.vpc_cidr
   ips_for_develop_purpose = var.ips_for_develop_purpose
+  app_port                = var.target_instance_port
   project_name            = var.project_name
   environment             = var.environment
 }
@@ -24,4 +25,16 @@ module "ec2_instances" {
   private_server_sg_id   = module.security_groups.private_server_sg_id
   project_name           = var.project_name
   environment            = var.environment
+}
+
+# ALB: 인터넷 → (공개 서브넷) ALB → (사설 서브넷) Private EC2
+module "elb" {
+  source               = "./module/resource/elb"
+  vpc_id               = module.network.vpc_id
+  public_subnet_ids    = module.network.public_subnet_ids
+  alb_sg_id            = module.security_groups.alb_sg_id
+  target_instance_port = var.target_instance_port
+  target_instance_id   = module.ec2_instances.private_server_id
+  project_name         = var.project_name
+  environment          = var.environment
 }

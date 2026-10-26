@@ -89,6 +89,15 @@ resource "aws_security_group" "private_server_sg" {
     security_groups = [aws_security_group.bastion_sg.id] # Bastion SG에 대해서만 허용
   }
 
+  ingress {
+    description     = "HTTP from ALB Security Group"
+    from_port       = var.app_port
+    to_port         = var.app_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg.id] # ALB 를 거친 요청만 허용
+  }
+
+  # ECR 이미지 Pull, CloudWatch 로그 전송, Secrets Manager 호출 등은 NAT 인스턴스를 거쳐 나간다.
   egress {
     from_port   = 0
     to_port     = 0
@@ -98,6 +107,36 @@ resource "aws_security_group" "private_server_sg" {
 
   tags = {
     Name        = "${var.project_name}-${var.environment}-private-server-sg"
+    ManagedBy   = "aaron"
+    Environment = var.environment
+  }
+}
+
+# 5. ALB SG: 인터넷(0.0.0.0/0)에서 HTTP(80) 허용
+#    - egress 를 private_server_sg 로 지정하면 서로를 참조하는 순환 의존이 생기므로 VPC 대역으로 연다
+resource "aws_security_group" "alb_sg" {
+  name        = "alb-sg"
+  description = "Security Group for Application Load Balancer"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description = "HTTP from anywhere"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "To targets inside the VPC"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  tags = {
+    Name        = "${var.project_name}-${var.environment}-alb-sg"
     ManagedBy   = "aaron"
     Environment = var.environment
   }
