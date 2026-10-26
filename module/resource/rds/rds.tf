@@ -18,7 +18,7 @@ resource "aws_db_subnet_group" "this" {
 resource "random_password" "db" {
   length           = 20
   special          = true
-  override_special = "!#$%^&*()-_=+" # RDS 금지 문자 / @ " 공백 제외
+  override_special = "!#%^&*()-_=+" # RDS 금지 문자 / $ @ " 공백 제외 - $ 의 경우 Github Actions 에서 사용할때 문제 발생 가능
 }
 
 # 2. PostgreSQL 인스턴스 (단일 AZ, 데이터베이스 서브넷 중 availability_zone 에 해당하는 서브넷에 배치)
@@ -39,7 +39,6 @@ resource "aws_db_instance" "this" {
   # (JSON 형태 {"username": "...", "password": "..."} 로 저장됨)
   # manage_master_user_password = true
   # 이렇게 설정하면 좋은것은 Github Actions 내 Taskdef 파일 만들때 비밀번호 주입없이 AWS Secrets Manager 비밀번호값 ARN 그대로 사용
-  # 단점은 DBeaver 같은 클라이언트 통해 RDS 접속 불가
 
   db_subnet_group_name   = aws_db_subnet_group.this.name
   vpc_security_group_ids = [var.database_sg_id]

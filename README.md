@@ -52,6 +52,7 @@ terraform.tfvars.example      # 입력값 예시 (복사해서 terraform.tfvars 
 - **보조 CIDR**: 기본 VPC CIDR(`10.0.0.0/24`)은 /26 서브넷 4개로 가득 차 있어서, `10.0.1.0/24` 를 VPC 에 추가로 연결해 DB 서브넷을 만들었습니다. (VPC 를 새로 만들 필요 없음)
 - **DB 서브넷 그룹**: RDS 는 서로 다른 AZ 의 서브넷 2개 이상이 필요합니다. 실제 인스턴스는 `ap-northeast-2a` 한 곳에만 만듭니다.
 - **SG → SG 허용**: DB 보안 그룹은 IP 가 아니라 *Private EC2 의 보안 그룹*에서 오는 5432 만 허용합니다.
+- **사설 EC2**: 단일 컨테이너를 사설 서브넷에 두고, Bastion / Private EC2 에서만 접근합니다. (공개 서비스가 필요하면 ALB 를 추가)
 
 ### 적용
 
@@ -61,7 +62,7 @@ terraform.tfvars.example      # 입력값 예시 (복사해서 terraform.tfvars 
 ```bash
 terraform init
 terraform plan
-terraform apply        # RDS 생성에 5~10분 걸립니다. Private EC2 는 RDS 주소가 필요해서 그 뒤에 만들어집니다.
+terraform apply        # RDS 생성에 5~10분 걸립니다. Private EC2 / EC2 가 RDS 주소가 필요한데 떠있지 않은 경우가 있을 수 있어서 방지를 위해 디펜던시를 거는것도 방법
 ```
 
 > 0차까지 이미 apply 한 상태라면: Private EC2 가 **재생성**됩니다.
@@ -96,7 +97,7 @@ Secrets: Read and write 그리고 Variables: Read and write 권한을 설정해�
 gh secret list -R OWNER/REPO
 ```
 
-- Private EC2 외의 곳(예: Bastion)에서 5432 접속이 **막히는 것**도 직접 확인해 보세요. (SG 의 역할)
+- Private Subnet 내 위치한 EC2 혹은 RDS 접속하기 위해서는 Bastion 통해 SSH Tunneling 하면 되는것을 확인해보세요
 
 ```bash
 # 1) Bastion 을 거쳐 Private EC2 접속 (출력된 명령을 그대로 복사)
@@ -121,8 +122,7 @@ terraform destroy      # 실습용 설정이라 RDS/S3 가 남아 있어도 삭�
 
 - **누가 무엇을 하나**: Terraform 은 _인프라_(ECR, 클러스터, 태스크 정의, 서비스)를 만들고, GitHub Actions 는 *이미지*를 만들어 올리고 재배포만 합니다. 태스크 정의는 `:latest` 이미지를 참조하므로 둘이 서로의 상태를 덮어쓰지 않습니다.
 - **실행 역할 vs 태스크 역할**: 실행 역할은 ECS 가 컨테이너를 _띄울 때_(ECR pull, 로그, 시크릿 주입), 태스크 역할은 _앱이 실행 중_ AWS API(S3)를 부를 때 씁니다.
-- **ALB 없음**: 단일 컨테이너를 사설 서브넷에 두고, Bastion / Private EC2 에서만 접근합니다. (공개 서비스가 필요하면 ALB 를 추가)
-- **컨테이너가 받는 환경 변수**: `AWS_REGION`, `S3_BUCKET`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`(시크릿)
+- **컨테이너가 받는 환경 변수**: `AWS_REGION`, `AWS_S3_BUCKET`, `DATASOURCE_URL`, `DATASOURCE_USERNAME`, `DATASOURCE_PASSWORD` 등 (시크릿)
 
 ### Fargate CPU/메모리
 
@@ -168,7 +168,6 @@ curl http://<태스크 사설 IP>:8080/
 
 - DB 보안 그룹이 _ECS 태스크 SG_ 도 허용합니다. (Private EC2 + ECS)
 - `terraform destroy` 시 ECR 이미지가 남아 있어도 삭제됩니다. (`force_delete`)
-- 계정에 GitHub OIDC 공급자가 이미 있으면 `already exists` 오류가 납니다 → `github_oidc_provider_arn` 에 기존 ARN 을 지정하세요.
 
 ## 3차: CloudWatch 로그/메트릭 + SNS 알람
 

@@ -13,8 +13,9 @@ resource "aws_instance" "bastion" {
   key_name                    = aws_key_pair.bastion.key_name
   associate_public_ip_address = true
 
+  lifecycle { ignore_changes = [ami] }
   tags = {
-    Name        = "bastion-instance"
+    Name        = "${var.project_name}-${var.environment}-bastion-instance"
     ManagedBy   = "aaron"
     Environment = var.environment
   }
@@ -54,8 +55,9 @@ resource "aws_instance" "nat" {
               service iptables save
               EOF
 
+  lifecycle { ignore_changes = [ami] }
   tags = {
-    Name        = "nat-instance"
+    Name        = "${var.project_name}-${var.environment}-nat-instance"
     ManagedBy   = "aaron"
     Environment = var.environment
   }
@@ -77,8 +79,9 @@ resource "aws_instance" "private_server" {
   key_name                    = aws_key_pair.private_server.key_name
   associate_public_ip_address = false # Private 서브넷이므로 Public IP 없음
 
+  lifecycle { ignore_changes = [ami] }
   tags = {
-    Name        = "private-server-instance"
+    Name        = "${var.project_name}-${var.environment}-private-server"
     ManagedBy   = "aaron"
     Environment = var.environment
   }

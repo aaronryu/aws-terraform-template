@@ -45,5 +45,5 @@ variable "memory" {
 variable "log_retention_days" {
   type        = number
   description = "days to keep container logs in CloudWatch Logs"
-  default     = 0 # 만기 없음
+  default     = 7 # 만기 없음
 }

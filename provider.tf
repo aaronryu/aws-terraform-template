@@ -17,7 +17,8 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Environment = "development"
+      Project     = var.project_name
+      Environment = var.environment
       ManagedBy   = "aaron"
     }
   }

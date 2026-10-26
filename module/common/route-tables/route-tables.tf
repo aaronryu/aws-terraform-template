@@ -8,7 +8,7 @@ resource "aws_route_table" "public_route_table" {
   }
 
   tags = {
-    Name        = "public-route-table"
+    Name        = "${var.project_name}-${var.environment}-public-route-table"
     ManagedBy   = "aaron"
     Environment = var.environment
   }
@@ -18,7 +18,7 @@ resource "aws_route_table" "private_route_table" {
   vpc_id = var.vpc_id
 
   tags = {
-    Name        = "private-route-table"
+    Name        = "${var.project_name}-${var.environment}-private-route-table"
     ManagedBy   = "aaron"
     Environment = var.environment
   }
@@ -29,7 +29,7 @@ resource "aws_route_table" "database_route_table" {
   vpc_id = var.vpc_id
 
   tags = {
-    Name        = "database-route-table"
+    Name        = "${var.project_name}-${var.environment}-database-route-table"
     ManagedBy   = "aaron"
     Environment = var.environment
   }

@@ -31,7 +31,7 @@ resource "aws_security_group" "bastion_sg" {
   }
 
   tags = {
-    Name        = "bastion-sg"
+    Name        = "${var.project_name}-${var.environment}-bastion-instance-sg"
     ManagedBy   = "aaron"
     Environment = var.environment
   }
@@ -69,7 +69,7 @@ resource "aws_security_group" "nat_instance_sg" {
   }
 
   tags = {
-    Name        = "nat-instance-sg"
+    Name        = "${var.project_name}-${var.environment}-nat-instance-sg"
     ManagedBy   = "aaron"
     Environment = var.environment
   }
@@ -98,7 +98,7 @@ resource "aws_security_group" "private_server_sg" {
   }
 
   tags = {
-    Name        = "private-server-sg"
+    Name        = "${var.project_name}-${var.environment}-private-server-sg"
     ManagedBy   = "aaron"
     Environment = var.environment
   }
@@ -136,7 +136,7 @@ resource "aws_security_group" "ecs_task_sg" {
   }
 
   tags = {
-    Name        = "ecs-task-sg"
+    Name        = "${var.project_name}-${var.environment}-ecs-task-sg"
     ManagedBy   = "aaron"
     Environment = var.environment
   }
@@ -171,7 +171,7 @@ resource "aws_security_group" "database_sg" {
   }
 
   tags = {
-    Name        = "database-sg"
+    Name        = "${var.project_name}-${var.environment}-database-sg"
     ManagedBy   = "aaron"
     Environment = var.environment
   }

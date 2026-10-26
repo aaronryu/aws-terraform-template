@@ -1,6 +1,13 @@
 # 이 파일을 terraform.tfvars 로 복사해서 값을 채우세요. (terraform.tfvars 는 .gitignore 대상)
 #   cp terraform.tfvars.example terraform.tfvars
 
+# 개발하는 여러분들의 집이나 자주가는 카페의 Public IP 추가하여 Bastion 에 접근할 수 있도록 오픈
+#   - Private Subnet 내 위치한 AWS EC2 혹은 AWS RDS 모두 직접 SSH 으로 붙을 수 없고 특정 IP 에 오픈된 Bastion 통해서만 접근가능
+ips_for_develop_purpose = [
+  # "112.216.230.34/32", # Jibmusil IP
+  "218.156.176.28/32",
+]
+
 # [3차] 알람 메일을 받을 주소 (apply 후 도착하는 구독 확인 메일의 Confirm 을 눌러야 알림이 옵니다)
 alarm_email = "you@example.com"
 

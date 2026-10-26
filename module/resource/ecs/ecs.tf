@@ -18,6 +18,7 @@ resource "aws_ecs_cluster" "this" {
 #        - 아래 서비스가 desired_count = 0 으로 해놓았고, 따라서 이 정의로는 컨테이너가 절대 단 한개도 뜨지 않는다.
 #        - 만약 desired_count = 1 이상이었다면, 계속 배포를 시도하고 실패하고를 반복하면서 AWS 비용이 부과될 것
 #    - family 이름은 Github Actions 에서 사용하는 taskdef JSON 템플릿 내 family 명과 반드시 같아야 한다. (같은 family 의 개정본으로 쌓인다)
+data "aws_region" "current" {}
 locals { container_name = "app" }
 
 resource "aws_ecs_task_definition" "app" {
@@ -39,7 +40,7 @@ resource "aws_ecs_task_definition" "app" {
         options = {
           "awslogs-group"         = aws_cloudwatch_log_group.app.name
           # "awslogs-create-group"  = true # 따로 이 옵션이 필요없는것이 같은 디렉토리 내 log.tf 파일을 통해 로그 그룹 생성 후 그 그룹명을 그대로 넣었기 때문
-          "awslogs-region"        = "ap-northeast-2"
+          "awslogs-region"        = data.aws_region.current.region
           "awslogs-stream-prefix" = "ecs"
         }
       }
