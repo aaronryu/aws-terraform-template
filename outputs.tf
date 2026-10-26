@@ -47,6 +47,9 @@ output "github_actions_vars" {
 output "github_actions_secrets" {
   sensitive = true
   value = {
+    # * 주의 : 아래 2개의 값은 현재 Terraform 명령어를 실행하는 사실상의 어드민 계정의 Access Key / Secret Key 를 직접 Github Secrets 내 넣으시길 바랍니다
+    # - AWS_ACCESS_KEY_ID
+    # - AWS_SECRET_ACCESS_KEY
     # 스프링 spring.datasource.* 가 읽는 이름 그대로
     DATASOURCE_URL      = "jdbc:postgresql://${module.rds.address}:${module.rds.port}/${module.rds.db_name}"
     DATASOURCE_USERNAME = module.rds.username
