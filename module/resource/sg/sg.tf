@@ -112,18 +112,18 @@ resource "aws_security_group" "private_server_sg" {
   }
 }
 
-# 5. ECS Task SG: 컨테이너 포트는 외부에서 접근 가능 (아직은 ALB 연결하지 않았기에 Public Open)
+# 5. ECS Task SG: 컨테이너 포트는 ALB 를 거친 요청만 허용 (이제 ECS 는 Private Subnet 내부로 감춘다)
 resource "aws_security_group" "ecs_task_sg" {
   name        = "ecs-task-sg"
   description = "Security Group for ECS Fargate tasks"
   vpc_id      = var.vpc_id
 
   ingress {
-    description     = "Container port from Public IPs"
+    description     = "Container port from ALB Security Group"
     from_port       = var.app_port
     to_port         = var.app_port
     protocol        = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    security_groups = [aws_security_group.alb_sg.id] # ALB 를 거친 요청만 허용
   }
 
   # ECR 이미지 Pull, CloudWatch 로그 전송, Secrets Manager 호출 등은 NAT 인스턴스를 거쳐 나간다.
@@ -151,10 +151,10 @@ resource "aws_security_group" "database_sg" {
   vpc_id      = var.vpc_id
 
   ingress {
-    description     = "PostgreSQL from Private Server Security Group"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
+    description = "PostgreSQL from Private Server Security Group"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
     security_groups = [
       aws_security_group.private_server_sg.id,
       aws_security_group.ecs_task_sg.id,
@@ -176,7 +176,7 @@ resource "aws_security_group" "database_sg" {
   }
 }
 
-# 5. ALB SG: 인터넷(0.0.0.0/0)에서 HTTP(80) 허용
+# 5. ALB SG: 인터넷(0.0.0.0/0)에서 HTTP 80 [production → ECS], 8080 [develop → Private EC2] 허용
 #    - egress 를 private_server_sg 로 지정하면 서로를 참조하는 순환 의존이 생기므로 VPC 대역으로 연다
 resource "aws_security_group" "alb_sg" {
   name        = "alb-sg"
@@ -184,9 +184,17 @@ resource "aws_security_group" "alb_sg" {
   vpc_id      = var.vpc_id
 
   ingress {
-    description = "HTTP from anywhere"
+    description = "HTTP from anywhere (production listener)"
     from_port   = 80
     to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "HTTP 8080 from anywhere (develop listener)"
+    from_port   = 8080
+    to_port     = 8080
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }

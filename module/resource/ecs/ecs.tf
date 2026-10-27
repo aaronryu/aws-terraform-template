@@ -53,6 +53,17 @@ resource "aws_ecs_service" "app" {
   desired_count   = 0
   launch_type     = "FARGATE"
 
+  # ALB 대상 그룹 연결: 태스크가 뜨면 ECS 가 그 태스크의 사설 IP:컨테이너 포트를 대상 그룹에 자동 등록한다
+  # - container_name / container_port 는 태스크 정의(GitHub Actions 가 등록하는 개정본 포함)의 컨테이너 이름 / 포트와 같아야 한다
+  load_balancer {
+    target_group_arn = var.target_group_arn
+    container_name   = local.container_name
+    container_port   = var.container_port
+  }
+
+  # 스프링 부트는 뜨는 데 시간이 걸리므로, 기동 직후 헬스체크 실패로 태스크가 죽지 않게 유예 시간을 준다
+  health_check_grace_period_seconds = 120
+
   # 새 태스크가 계속 기동에 실패하면 배포를 FAILED 로 멈추는 설정
   # - 어자피 재배포해도 실패하는 이미지 / 컨테이너인데 지속적으로 불필요한 재배포에 따른 비용낭비를 방지하기 위해 본 설정
   #    - 직전 성공 배포로 되돌리는 설정은 껐다 (플레이스홀더 태스크 정의가 :placeholder 존재하지 않는 태그의 도커 이미지를 사용하기때문)
@@ -62,9 +73,9 @@ resource "aws_ecs_service" "app" {
   }
 
   network_configuration {
-    subnets          = var.public_subnet_ids # 추후 Private Subnet 사용하여 ALB 붙이는것이 좋다 - 좀 더 현업에 맞는 설계
+    subnets          = var.private_subnet_ids # ALB 가 앞에서 받아 주므로 태스크는 사설 서브넷에 숨긴다 - 현업 표준 설계
     security_groups  = [var.ecs_task_sg_id]
-    assign_public_ip = true # 만약 Private Subnet 사설 서브넷 사용 시 false 으로 변환: 인터넷으로 나갈 때 NAT 인스턴스 사용하도록
+    assign_public_ip = false # 공인 IP 없음: ECR 이미지 Pull, CloudWatch 로그 전송 등 인터넷으로 나갈 때는 NAT 인스턴스를 거친다
   }
 
   # 이 두 값은 이제 Github Actions 통한 자동 CI/CD 배포 시 자체적으로 렌더링한 JSON 태스크 정의로 바꾸는 값이기때문에

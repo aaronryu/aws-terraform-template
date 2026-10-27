@@ -9,6 +9,7 @@
 | 2차  | `add-on-base/2-aws-rds-and-s3`  | 데이터베이스 서버를 위한 보조 CIDR + DB 전용 서브넷 2개, RDS(PostgreSQL)              |
 | 3차  | `add-on-base/2-aws-rds-and-s3`  | S3 버킷(공개 읽기, CORS, 암호화) + 스프링 앱용 IAM 사용자/액세스 키                   |
 | 4차  | `add-on-base/3-aws-ecr-and-ecs` | ECR(이미지 저장소) + ECS Fargate(클러스터, 태스크 정의, 서비스) + GitHub Actions 배포 |
+| 5차  | `add-on-base/4-aws-ecs-and-elb` | ECS 를 사설 서브넷으로 숨기고 ALB 연결, ALB 하나를 포트로 분기 (:80 ECS / :8080 EC2)  |
 
 ## 디렉터리 구조
 
@@ -19,7 +20,7 @@ module/common/*               # VPC, 서브넷, IGW, 라우팅 테이블 (네트
 module/network                # 네트워크 부품을 묶은 모듈
 module/resource/sg            # 보안 그룹 모음
 module/resource/ec2           # Bastion, NAT, Private EC2
-module/resource/elb           # [1차] ALB, 대상 그룹, 리스너
+module/resource/elb           # [1차] ALB, 대상 그룹, 리스너 → [5차] ECS(ip) / EC2(instance) 대상 그룹 + 리스너 2개
 module/resource/rds           # [2차] DB 서브넷 그룹 + PostgreSQL
 module/resource/s3            # [3차] S3 버킷 + 스프링 앱 사용자에게 붙이는 버킷 권한
 module/resource/ecr           # [4차] ECR 저장소 + 오래된 이미지 정리 라이프사이클
@@ -417,6 +418,105 @@ unset CLUSTER SERVICE TASK ENI IP
 terraform destroy      # 실습용 설정이라 ECR force_delete = true, 이미지가 남아 있어도 저장소가 삭제됩니다.
 ```
 
+## 5차: ECS(Fargate) 를 사설 서브넷으로 + ALB 연결 ← 하나의 ALB 를 포트로 분기
+
+```
+                     사용자 (브라우저 / curl)
+         :80 production_url  │  │ :8080 develop_url
+                             ▼  ▼
+                            [ IGW ]
+                               │
+ ┌─ 공개 서브넷 2a / 2b ───────┼────────────────────────────────────────────┐
+ │  ┌──────────────────────────▼─────────────────────────────────────────┐  │
+ │  │ ALB (alb-sg: 80, 8080 허용)                                        │  │
+ │  │   리스너 :80   → 대상 그룹 ecs-tg (target_type = ip)       [prod]  │  │
+ │  │   리스너 :8080 → 대상 그룹 ec2-tg (target_type = instance) [dev]   │  │
+ │  └───────────┬──────────────────────────────────┬─────────────────────┘  │
+ │  Bastion     │                                  │          NAT 인스턴스  │
+ └──────────────┼──────────────────────────────────┼───────────────▲────────┘
+                │ :8080 ECS 가 IP 자동 등록        │ :8080 TF 등록  │
+ ┌─ 사설 서브넷 ▼ 2a / 2b ─────────────────────────▼───────────────┼────────┐
+ │  Fargate 태스크 (ecs-task-sg)          Private EC2 (private-server-sg)   │
+ │  - 공인 IP 없음                        - develop 존 (앱 미배포 시 502)   │
+ │  - ECR Pull / S3 는 NAT 경유 ───────────────────────────────────┘        │
+ └──────────────┬───────────────────────────────────────────────────────────┘
+                │ 5432
+                ▼
+              RDS PostgreSQL (DB 서브넷)
+```
+
+- `ecs-tg` 에는 ECS 서비스가 태스크의 사설 IP 를 자동 등록하고, `ec2-tg` 에는 Terraform(TF) 이 `aws_lb_target_group_attachment` 로 인스턴스를 등록합니다.
+
+핵심 포인트
+
+- **태스크를 사설 서브넷으로**: `subnets = private_subnet_ids`, `assign_public_ip = false`. 인터넷에서는 ALB 만 보이고, 태스크는 ALB 를 통해서만 접근됩니다. (`ecs-task-sg` 는 `alb-sg` 에서 오는 8080 만 허용)
+- **나가는 길은 NAT**: 공인 IP 가 없어도 ECR 이미지 Pull, S3 호출은 사설 라우팅 테이블의 `0.0.0.0/0 → NAT 인스턴스` 로 나갑니다. 그래서 EC2 모듈(NAT, Bastion, 앱용 IAM 사용자)은 계속 필요합니다.
+- **대상 그룹 `target_type` 비교** (`module/resource/elb/elb.tf` 에서 나란히 볼 수 있다)
+
+  |               | ECS Fargate (`ecs-tg`)                        | Private EC2 (`ec2-tg`)                       |
+  | ------------- | --------------------------------------------- | -------------------------------------------- |
+  | `target_type` | `ip` (태스크마다 전용 ENI / 사설 IP)          | `instance` (인스턴스 ID)                     |
+  | 누가 등록하나 | ECS 서비스 (`ecs.tf` 의 `load_balancer` 블록) | Terraform (`aws_lb_target_group_attachment`) |
+  | 언제 바뀌나   | 배포 / 재시작마다 IP 가 바뀌고 자동 등록·해제 | 인스턴스를 다시 만들 때만                    |
+
+- **연결 방향이 EC2 와 반대**: EC2 는 `ec2 모듈 ─(instance id)─▶ elb 모듈`, ECS 는 `elb 모듈 ─(대상 그룹 ARN)─▶ ecs 모듈`. 태스크는 apply 시점에 존재하지 않으므로 Terraform 이 넘겨줄 IP 가 없고, 대신 ECS 서비스에게 "이 대상 그룹에 등록해라" 라고 알려 줍니다.
+- **ALB 하나를 포트로 분기**: ALB 는 대당 시간 요금이 붙지만 리스너 / 대상 그룹은 추가 요금이 없습니다. 도메인이 없어 host 기반 분기를 못 쓰고, path 기반(`/dev/*`)은 앱 경로가 바뀌므로 포트로 나눴습니다.
+- **헬스체크는 `/actuator/health`**: 스프링 앱에 `/` 매핑이 없어 기본값 `/` 은 404 → 계속 unhealthy → 태스크 교체 반복이 됩니다. `health_check_grace_period_seconds = 120` 으로 기동 중 헬스체크 실패도 봐 줍니다.
+- **`deregistration_delay = 30`**: 배포 시 이전 태스크를 대상에서 빼고 기다리는 시간 (기본 300초면 배포마다 5분씩 늘어진다)
+- **develop 존 주의**: 실습 편의상 Private EC2(develop) 와 ECS(production) 가 **같은 RDS / S3 버킷**을 씁니다. develop 에서 `ddl-auto=update` 로 앱을 띄우면 production 스키마가 바뀔 수 있습니다. 실무에서는 환경별로 DB / 버킷(더 나아가 VPC, AWS 계정)을 분리합니다.
+
+### 적용
+
+**처음부터 만드는 경우**: 그냥 apply 하면 됩니다.
+
+```bash
+terraform apply
+```
+
+**4차가 이미 떠 있는 상태에서 올라오는 경우**: destroy 없이 위와 똑같이 `terraform apply` 한 번으로 넘어갑니다. 80 리스너는 기존 `ec2-tg` 에서 새 `ecs-tg` 로 바뀌고, `ec2-tg` 는 그대로 새 8080 리스너에 연결됩니다.
+
+- ECS 서비스는 **in-place 업데이트**라 무중단으로 넘어갑니다. 사설 서브넷에 새 태스크가 먼저 뜨고 → `ecs-tg` 에 등록되어 healthy 가 되면 → 공개 서브넷의 예전 태스크가 내려갑니다. (`ignore_changes` 덕분에 GitHub Actions 가 올린 태스크 정의 개정본과 `desired_count = 1` 은 그대로)
+- `terraform apply` 는 서비스 업데이트를 요청만 하고 바로 끝납니다. 실제 교체는 이후 3~5분(NAT 경유 이미지 Pull + 헬스체크 유예 120초) 동안 진행됩니다.
+- 예전 태스크의 `http://<공인 IP>:8080` 은 `ecs-task-sg` 의 `0.0.0.0/0` 규칙이 바뀌는 시점에 끊깁니다. 이제 접속 주소는 ALB 입니다.
+
+### 확인
+
+```bash
+# 1) 롤아웃이 안정될 때까지 대기 (최대 10분)
+CLUSTER=$(terraform output -json github_actions_vars | jq -r .ECS_CLUSTER)
+SERVICE=$(terraform output -json github_actions_vars | jq -r .ECS_SERVICE)
+aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+unset CLUSTER SERVICE
+
+# 2) ECS 대상 그룹: 태스크의 사설 IP(10.0.0.128/26 또는 10.0.0.192/26 대역)가 healthy 인지
+aws elbv2 describe-target-health --target-group-arn "$(terraform output -raw ecs_target_group_arn)" \
+  --query 'TargetHealthDescriptions[].{ip:Target.Id,state:TargetHealth.State}' --output table
+
+# 3) ALB 를 통해 호출: {"status":"UP"} 이면 RDS 연결까지 정상
+curl "$(terraform output -raw production_url | sed 's#/files/page##')/actuator/health"
+```
+
+브라우저에 바로 붙여 넣을 주소는 output 으로 나옵니다. (apply 끝에도 출력된다)
+
+```bash
+terraform output -raw production_url          # http://<alb_dns_name>:80/files/page   → ECS (production)
+terraform output -raw develop_url             # http://<alb_dns_name>:8080/files/page → Private EC2 (develop)
+open "$(terraform output -raw production_url)"   # macOS: 브라우저로 바로 열기 (복사만 하려면 | pbcopy)
+```
+
+`production_url` 에서 4차와 같은 파일 업로드 / 목록 / 삭제 화면이 뜨면 성공입니다. 이제 태스크가 재배포되어 IP 가 바뀌어도 주소는 그대로입니다.
+
+![성공적으로 스프링 어플리케이션이 ELB - 프라이빗 ECS 내 배포되었을때](elb-spring-succeed.png)
+
+- `develop_url` 은 Private EC2 에 앱을 띄우지 않았다면 `ec2-tg` 가 unhealthy 이고 `502 Bad Gateway` 가 정상입니다. (대상이 전부 unhealthy 면 ALB 는 fail-open 으로 그래도 요청을 넘기는데, 8080 에 아무것도 없어서 502)
+- Fargate 태스크에는 SSH 로 들어갈 수 없습니다. (호스트 접근 불가, 컨테이너에 sshd 없음) 쉘이 필요하면 ECS Exec(`aws ecs execute-command`, SSM 기반) 을, 앱 포트만 직접 보려면 Bastion 경유 포트 포워딩(`ssh -L 18080:<태스크 사설 IP>:8080 ...`, 단 `ecs-task-sg` 에 Bastion SG 허용 추가 필요)을 씁니다.
+
+### 정리
+
+```bash
+terraform destroy
+```
+
 ## 비용 참고 (서울 리전, 대략)
 
-t3.micro × 3 (Bastion, NAT, Private EC2) + [1차] ALB 1개(시간당 요금 + LCU 사용량) + [2차] RDS `db.t3.micro` + gp3 20GB + [3차] S3 (저장 용량 + 요청 수, 실습 수준이면 거의 0) + [4차] Fargate 태스크 0.5 vCPU / 1GB (실행 중인 시간만큼) + 태스크 공인 IPv4 + ECR 저장 용량. 실습 후에는 꼭 `terraform destroy` 하세요.
+t3.micro × 3 (Bastion, NAT, Private EC2) + [1차] ALB 1개(시간당 요금 + LCU 사용량) + [2차] RDS `db.t3.micro` + gp3 20GB + [3차] S3 (저장 용량 + 요청 수, 실습 수준이면 거의 0) + [4차] Fargate 태스크 0.5 vCPU / 1GB (실행 중인 시간만큼) + 태스크 공인 IPv4 + ECR 저장 용량. [5차] 에서는 ALB 를 그대로 재사용하고(리스너 / 대상 그룹은 무료) 태스크 공인 IPv4 가 사라지는 대신 NAT 를 거치는 트래픽이 생깁니다. 실습 후에는 꼭 `terraform destroy` 하세요.

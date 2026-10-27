@@ -27,7 +27,20 @@ output "alb_dns_name" {
   value = module.elb.alb_dns_name
 }
 
-# 대상 그룹 헬스체크 상태 확인용 > aws elbv2 describe-target-health --target-group-arn $(terraform output -raw ec2_target_group_arn)
+output "production_url" {
+  value = "${module.elb.production_url}/files/page"
+}
+
+output "develop_url" {
+  value = "${module.elb.develop_url}/files/page"
+}
+
+# ECS 대상 그룹 헬스체크 상태 확인용 > aws elbv2 describe-target-health --target-group-arn $(terraform output -raw ecs_target_group_arn)
+output "ecs_target_group_arn" {
+  value = module.elb.ecs_target_group_arn
+}
+
+# EC2 대상 그룹 헬스체크 상태 확인용 > aws elbv2 describe-target-health --target-group-arn $(terraform output -raw ec2_target_group_arn)
 output "ec2_target_group_arn" {
   value = module.elb.ec2_target_group_arn
 }
