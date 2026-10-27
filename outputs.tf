@@ -55,6 +55,8 @@ output "github_actions_vars" {
     AWS_REGION     = data.aws_region.current.region
     AWS_ACCOUNT_ID = data.aws_caller_identity.current.account_id
     AWS_S3_BUCKET  = module.s3.bucket_name
+    ECR_REGISTRY   = module.ecr.repository_url
+    ECR_REPOSITORY = module.ecr.repository_name
   }
 }
 

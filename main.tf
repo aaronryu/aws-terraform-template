@@ -65,3 +65,10 @@ module "s3" {
   #   # ecs = module.ecs.task_role_name # 나중에 ECS 붙일 때 한 줄 추가
   # }
 }
+
+# ECR: 도커 이미지 저장소
+module "ecr" {
+  source       = "./module/resource/ecr"
+  project_name = var.project_name
+  environment  = var.environment
+}
