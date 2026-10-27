@@ -76,6 +76,7 @@ output "github_actions_vars" {
     ECS_TASKDEF            = module.ecs.task_definition
     ECS_CONTAINER          = module.ecs.container_name
     ECS_EXECUTION_ROLE_ARN = module.ecs.execution_role_arn
+    ECS_LOG_GROUP          = module.ecs.log_group_name
   }
 }
 

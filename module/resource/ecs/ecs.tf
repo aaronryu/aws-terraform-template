@@ -35,6 +35,16 @@ resource "aws_ecs_task_definition" "app" {
       image        = "${var.ecr_repository_url}:placeholder" # 실제 존재하지않는 이미지 -> 실제 이미지는 :latest 태그명
       essential    = true
       portMappings = [{ containerPort = var.container_port, protocol = "tcp" }]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.app.name
+          "awslogs-region"        = data.aws_region.current.region
+          "awslogs-stream-prefix" = "ecs"
+          # "awslogs-create-group"  = true # 따로 이 옵션이 필요없는것이 같은 디렉토리 내 logs.tf 파일을 통해 로그 그룹 생성 후 그 그룹명을 그대로 넣었기 때문
+          # 만약 위의 awslogs-create-group 옵션을 쓰려면 기존 AmazonECSTaskExecutionRolePolicy 에 없는 logs:CreateLogGroup 권한 추가가 필요
+        }
+      }
     }
   ])
 
