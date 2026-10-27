@@ -21,3 +21,6 @@ cors_allowed_origins = [
 # ECS 내 컨테이너 자원 사양을 바꿀때
 # ecs_task_cpu    = 512
 # ecs_task_memory = 1024
+
+# 특정 매트릭을 기반(에러 로그 개수 포함) 알람 메일을 받을 주소 (apply 후 도착하는 구독 확인 메일의 Confirm 을 눌러야 알림이 옵니다)
+alarm_email = "you@example.com"

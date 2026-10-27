@@ -2,14 +2,15 @@
 
 단일 서버 운영에 필요한 AWS 인프라를 Terraform 으로 단계별로 쌓아가는 실습 템플릿입니다.
 
-| 단계 | 브랜치                          | 추가되는 내용                                                                         |
-| ---- | ------------------------------- | ------------------------------------------------------------------------------------- |
-| 0차  | `base/aws-vpc-nat-and-bastion`  | VPC, IGW, 공개/사설 서브넷, NAT 인스턴스, Bastion, Private EC2                        |
-| 1차  | `add-on-base/1-aws-elb`         | ELB(L7-ALB) 연결하여 사설 서브넷 내 EC2 외부로 서비스 서빙                            |
-| 2차  | `add-on-base/2-aws-rds-and-s3`  | 데이터베이스 서버를 위한 보조 CIDR + DB 전용 서브넷 2개, RDS(PostgreSQL)              |
-| 3차  | `add-on-base/2-aws-rds-and-s3`  | S3 버킷(공개 읽기, CORS, 암호화) + 스프링 앱용 IAM 사용자/액세스 키                   |
-| 4차  | `add-on-base/3-aws-ecr-and-ecs` | ECR(이미지 저장소) + ECS Fargate(클러스터, 태스크 정의, 서비스) + GitHub Actions 배포 |
-| 5차  | `add-on-base/4-aws-ecs-and-elb` | ECS 를 사설 서브넷으로 숨기고 ALB 연결, ALB 하나를 포트로 분기 (:80 ECS / :8080 EC2)  |
+| 단계 | 브랜치                                | 추가되는 내용                                                                         |
+| ---- | ------------------------------------- | ------------------------------------------------------------------------------------- |
+| 0차  | `base/aws-vpc-nat-and-bastion`        | VPC, IGW, 공개/사설 서브넷, NAT 인스턴스, Bastion, Private EC2                        |
+| 1차  | `add-on-base/1-aws-elb`               | ELB(L7-ALB) 연결하여 사설 서브넷 내 EC2 외부로 서비스 서빙                            |
+| 2차  | `add-on-base/2-aws-rds-and-s3`        | 데이터베이스 서버를 위한 보조 CIDR + DB 전용 서브넷 2개, RDS(PostgreSQL)              |
+| 3차  | `add-on-base/2-aws-rds-and-s3`        | S3 버킷(공개 읽기, CORS, 암호화) + 스프링 앱용 IAM 사용자/액세스 키                   |
+| 4차  | `add-on-base/3-aws-ecr-and-ecs`       | ECR(이미지 저장소) + ECS Fargate(클러스터, 태스크 정의, 서비스) + GitHub Actions 배포 |
+| 5차  | `add-on-base/4-aws-ecs-and-elb`       | ECS 를 사설 서브넷으로 숨기고 ALB 연결, ALB 하나를 포트로 분기 (:80 ECS / :8080 EC2)  |
+| 6차  | `add-on-base/5-aws-cloudwatch-on-ecs` | ECS 컨테이너 로그(CloudWatch Logs) + CPU / 메모리 / ERROR 로그 알람 → SNS 이메일      |
 
 ## 디렉터리 구조
 
@@ -24,7 +25,8 @@ module/resource/elb           # [1차] ALB, 대상 그룹, 리스너 → [5차] 
 module/resource/rds           # [2차] DB 서브넷 그룹 + PostgreSQL
 module/resource/s3            # [3차] S3 버킷 + 스프링 앱 사용자에게 붙이는 버킷 권한
 module/resource/ecr           # [4차] ECR 저장소 + 오래된 이미지 정리 라이프사이클
-module/resource/ecs           # [4차] ECS 클러스터, 플레이스홀더 태스크 정의, 서비스, 실행 역할
+module/resource/ecs           # [4차] ECS 클러스터, 플레이스홀더 태스크 정의, 서비스, 실행 역할 → [6차] CloudWatch 로그 그룹(logs.tf)
+module/resource/monitoring    # [6차] SNS 토픽 + 이메일 구독(sns.tf), CPU / 메모리 / ERROR 로그 알람(cloudwatch.tf)
 ```
 
 ## 0차: AWS VPC + SG + EC2 (Private 1 + Public 2)
@@ -517,6 +519,115 @@ open "$(terraform output -raw production_url)"   # macOS: 브라우저로 바로
 terraform destroy
 ```
 
+## 6차: CloudWatch 로그 / 메트릭 + SNS 알람 ← ECS 컨테이너 모니터링
+
+```
+ Fargate 태스크 (Spring)
+   │ stdout / stderr (Logback 콘솔 출력, 스프링 설정 변경 없음)
+   │ awslogs 로그 드라이버 + 실행 역할 권한, NAT 경유
+   ▼
+ CloudWatch Logs  /ecs/tf-practice-dev-app  (ecs/app/<taskId> 스트림, 7일 보존)
+   │ 로그 메트릭 필터: "ERROR" 1줄당 +1
+   ▼
+ 커스텀 메트릭  tf-practice/dev : AppErrorCount ─▶ 알람 app-error-logs  (1분 Sum >= 1)    ─┐
+                                                                                           │
+ 기본 메트릭    AWS/ECS : CPUUtilization ────────▶ 알람 ecs-cpu-high    (3분 연속 >= 80%) ─┤
+               AWS/ECS : MemoryUtilization ──────▶ 알람 ecs-memory-high (3분 연속 >= 80%) ─┤
+                          이메일 구독 ◀── SNS 토픽 tf-practice-dev-alerts ◀────────────────┘
+```
+
+핵심 포인트
+
+- **로그는 로그 그룹이 아니라 로그 드라이버가 보냅니다**: `aws_cloudwatch_log_group`(`module/resource/ecs/logs.tf`) 은 빈 저장소일 뿐입니다. 태스크 정의의 `logConfiguration { logDriver = "awslogs" }` 가 컨테이너의 stdout / stderr 를 가로채 이 그룹으로 보냅니다. 스프링은 기본적으로 콘솔에 로그를 찍으므로 앱 쪽 설정은 필요 없습니다. (반대로 로그를 파일로만 쓰게 바꾸면 아무것도 안 쌓입니다)
+- **로그 그룹을 Terraform 으로 먼저 만든다**: 보존 기간(`log_retention_days`, 기본 7일)을 코드로 관리하기 위해서입니다. 실행 역할(`AmazonECSTaskExecutionRolePolicy`)에는 `logs:CreateLogStream` / `logs:PutLogEvents` 만 있고 `logs:CreateLogGroup` 은 없어서, `awslogs-create-group` 옵션 대신 이미 만든 그룹 이름을 넣습니다.
+- **일반 EC2 는 다르다**: EC2 에서 `java -jar` 로 띄운 앱은 CloudWatch Agent 설치 + 수집할 로그 파일 설정 + 인스턴스 프로파일 권한이 있어야 로그가 모입니다. Fargate 는 로그 드라이버가 플랫폼에 들어 있어서 태스크 정의만으로 됩니다.
+- **ECS CPU / 메모리 메트릭은 공짜로 들어온다**: `AWS/ECS` 네임스페이스에 1분 간격으로 자동 수집됩니다. 값은 "태스크에 할당한 용량 대비 사용률(%)" 이라 태스크 크기(CPU / 메모리)를 줄일지 늘릴지 판단하는 근거가 됩니다.
+- **메트릭 필터와 알람은 "이름" 으로 연결된다**: 필터는 `namespace / metric_name` 에 숫자를 쓰고, 알람은 같은 `namespace / metric_name` 을 읽습니다. Terraform 참조가 아니라 문자열로 이어지기 때문에 오타가 나면 에러 없이 알람이 영원히 조용합니다. 그래서 `locals` 로 한 번만 정의해 양쪽에서 씁니다.
+- **`treat_missing_data = "notBreaching"`**: 배포 중이거나 태스크가 0개라서 데이터가 비는 구간을 OK 로 봅니다.
+- **`alarm_actions` + `ok_actions`**: ALARM 으로 바뀔 때와 다시 OK 로 돌아올 때 모두 메일이 옵니다.
+- **모듈 구성**: `module/resource/monitoring` 하나에 `sns.tf`(알림 채널) / `cloudwatch.tf`(알람, 메트릭 필터) 로 나눴습니다. 로그 그룹은 컨테이너 설정과 짝이라 `ecs` 모듈에 둡니다.
+
+### 적용
+
+알람을 받을 이메일을 `terraform.tfvars` 에 넣고 apply 합니다.
+
+```hcl
+alarm_email = "you@example.com"
+```
+
+```bash
+terraform apply
+```
+
+- apply 직후 AWS 가 보내는 **"AWS Notification - Subscription Confirmation"** 메일의 `Confirm subscription` 링크를 눌러야 구독이 활성화됩니다. 누르기 전에는 `PendingConfirmation` 상태라 알람 메일이 오지 않습니다. (스팸함도 확인)
+- **apply 만으로는 로그가 쌓이지 않습니다.** Terraform 이 `logConfiguration` 을 넣은 것은 플레이스홀더 태스크 정의뿐이고, 서비스는 `ignore_changes [task_definition]` 때문에 GitHub Actions 가 등록한 예전 개정본(로그 설정 없음)을 계속 씁니다. 아래 재배포가 필요합니다.
+
+### 배포
+
+스프링 프로젝트의 [`aws/ecr-ecs/add-cloudwatch`](https://github.com/aaronryu/aws-spring-tutorial/tree/aws/ecr-ecs/add-cloudwatch) 브랜치는 `ecs-task-def.json` 에 `awslogs` 설정이 들어 있고, 로그 그룹 이름을 GitHub 변수 `ECS_LOG_GROUP` 으로 받습니다.
+
+1. 새로 추가된 `ECS_LOG_GROUP` 을 포함해 Variables 를 다시 등록합니다. (4차 배포의 Variables 등록 명령을 그대로 다시 실행해도 됩니다)
+
+   ```bash
+   REPO=<본인 GitHub 계정>/aws-spring-tutorial
+   gh variable set ECS_LOG_GROUP -R "$REPO" --body "$(terraform output -json github_actions_vars | jq -r .ECS_LOG_GROUP)"
+   unset REPO
+   ```
+
+   - 이 값이 없으면 `envsubst` 가 빈 문자열로 치환해서 "치환 안 된 `${`" 검사에도 걸리지 않습니다. 값이 틀리면(없는 그룹) 실행 역할에 그룹 생성 권한이 없어서 태스크가 `ResourceInitializationError` 로 뜨지 못하고, 서킷 브레이커가 이전 개정본으로 롤백합니다.
+
+2. `aws/ecr-ecs/add-cloudwatch` 브랜치에 push 하면 (또는 Actions 탭에서 Re-run) 로그 설정이 들어간 새 개정본으로 배포됩니다.
+
+### 확인
+
+```bash
+# 1) 지금 서비스가 쓰는 태스크 정의에 awslogs 설정이 들어갔는지 (null 이면 아직 재배포 전)
+CLUSTER=$(terraform output -json github_actions_vars | jq -r .ECS_CLUSTER)
+SERVICE=$(terraform output -json github_actions_vars | jq -r .ECS_SERVICE)
+LOG_GROUP=$(terraform output -json github_actions_vars | jq -r .ECS_LOG_GROUP)
+TASKDEF=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --query 'services[0].taskDefinition' --output text)
+aws ecs describe-task-definition --task-definition "$TASKDEF" --query 'taskDefinition.containerDefinitions[0].logConfiguration'
+
+# 2) 컨테이너 로그 실시간 보기 (Ctrl+C 로 종료) - 스프링 기동 로그가 보이면 성공
+aws logs tail "$LOG_GROUP" --follow
+
+# 3) SNS 구독 상태: SubscriptionArn 이 PendingConfirmation 이면 확인 메일을 아직 안 누른 것
+aws sns list-subscriptions-by-topic --topic-arn "$(terraform output -raw sns_topic_arn)" \
+  --query 'Subscriptions[].{endpoint:Endpoint,arn:SubscriptionArn}' --output table
+
+# 4) 알람 3개의 현재 상태 (OK / ALARM / INSUFFICIENT_DATA)
+aws cloudwatch describe-alarms --alarm-names \
+  "$(terraform output -raw cpu_alarm_name)" "$(terraform output -raw memory_alarm_name)" "$(terraform output -raw error_alarm_name)" \
+  --query 'MetricAlarms[].{name:AlarmName,state:StateValue}' --output table
+```
+
+AWS 콘솔에서는 **CloudWatch > 로그 그룹 > `/ecs/tf-practice-dev-app`** 에서 `ecs/app/<태스크 ID>` 스트림을, **CloudWatch > 경보** 에서 알람 3개를 볼 수 있습니다.
+
+**알람 메일 테스트**: 실제로 ERROR 를 일으키지 않아도, 로그 그룹에 테스트 로그를 한 줄 넣으면 메트릭 필터 → 알람 → SNS → 이메일 전체 흐름을 확인할 수 있습니다.
+
+```bash
+# 5) 테스트 스트림에 "ERROR" 로그 1줄 → 1~2분 뒤 app-error-logs 알람이 ALARM → 메일 도착 → 그 다음 1분 뒤 OK 메일
+aws logs create-log-stream --log-group-name "$LOG_GROUP" --log-stream-name manual-test
+aws logs put-log-events --log-group-name "$LOG_GROUP" --log-stream-name manual-test \
+  --log-events "timestamp=$(date +%s000),message=ERROR manual alarm test"
+
+# (메트릭 필터 없이 SNS → 이메일 경로만 확인하려면 알람 상태를 강제로 바꿔 본다. 다음 평가 주기에 원래 상태로 돌아간다)
+aws cloudwatch set-alarm-state --alarm-name "$(terraform output -raw cpu_alarm_name)" \
+  --state-value ALARM --state-reason "manual test"
+
+unset CLUSTER SERVICE LOG_GROUP TASKDEF
+```
+
+- 메트릭 필터는 **필터를 만든 이후에 들어온 로그**에만 적용됩니다. 예전 로그는 다시 계산되지 않습니다.
+- 패턴 `"ERROR"` 는 대소문자를 구분하고, 스택 트레이스의 여러 줄 중 `ERROR` 가 찍힌 줄만 셉니다. (스프링 기본 로그 형식의 레벨 칸이 `ERROR`)
+- CPU / 메모리 알람을 실제 메트릭으로 울려 보고 싶다면 `main.tf` 의 `module "monitoring"` 에 `cpu_threshold_percent = 1` 을 잠깐 추가해 apply 하면 3분 뒤 ALARM 이 됩니다. (확인 후 다시 지우고 apply)
+
+### 정리
+
+```bash
+terraform destroy      # 로그 그룹도 함께 지워집니다. (안에 쌓인 로그 포함)
+```
+
 ## 비용 참고 (서울 리전, 대략)
 
-t3.micro × 3 (Bastion, NAT, Private EC2) + [1차] ALB 1개(시간당 요금 + LCU 사용량) + [2차] RDS `db.t3.micro` + gp3 20GB + [3차] S3 (저장 용량 + 요청 수, 실습 수준이면 거의 0) + [4차] Fargate 태스크 0.5 vCPU / 1GB (실행 중인 시간만큼) + 태스크 공인 IPv4 + ECR 저장 용량. [5차] 에서는 ALB 를 그대로 재사용하고(리스너 / 대상 그룹은 무료) 태스크 공인 IPv4 가 사라지는 대신 NAT 를 거치는 트래픽이 생깁니다. 실습 후에는 꼭 `terraform destroy` 하세요.
+t3.micro × 3 (Bastion, NAT, Private EC2) + [1차] ALB 1개(시간당 요금 + LCU 사용량) + [2차] RDS `db.t3.micro` + gp3 20GB + [3차] S3 (저장 용량 + 요청 수, 실습 수준이면 거의 0) + [4차] Fargate 태스크 0.5 vCPU / 1GB (실행 중인 시간만큼) + 태스크 공인 IPv4 + ECR 저장 용량. [5차] 에서는 ALB 를 그대로 재사용하고(리스너 / 대상 그룹은 무료) 태스크 공인 IPv4 가 사라지는 대신 NAT 를 거치는 트래픽이 생깁니다. [6차] CloudWatch Logs 수집 / 저장 용량(7일 보존, 실습 수준이면 거의 0) + 표준 알람 3개(개당 월 약 $0.10) + SNS 이메일(월 1,000건까지 무료). 실습 후에는 꼭 `terraform destroy` 하세요.

@@ -99,3 +99,21 @@ output "github_actions_secrets" {
     APP_AWS_SECRET_ACCESS_KEY = module.ec2_instances.app_secret_access_key
   }
 }
+
+# AWS Lambda 에서 아래 토픽을 구독하거나 / EC2, RDS 등의 알람 설정 시 아래 토픽에 보내도록 설정할수도 있다
+output "sns_topic_arn" {
+  value = module.monitoring.sns_topic_arn
+}
+
+# 아래 다수의 알람명들을 갖고 여러분 스스로 CloudWatch 커스텀 대시보드 구성이 가능
+output "cpu_alarm_name" {
+  value = module.monitoring.cpu_alarm_name
+}
+
+output "memory_alarm_name" {
+  value = module.monitoring.memory_alarm_name
+}
+
+output "error_alarm_name" {
+  value = module.monitoring.error_alarm_name
+}

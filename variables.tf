@@ -53,3 +53,8 @@ variable "ecs_task_memory" {
   description = "fargate task memory in MiB"
   default     = 1024
 }
+
+variable "alarm_email" {
+  type        = string
+  description = "email address that receives CloudWatch alarm notifications (needs a confirmation click)"
+}
