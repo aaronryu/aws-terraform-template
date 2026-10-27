@@ -2,12 +2,13 @@
 
 단일 서버 운영에 필요한 AWS 인프라를 Terraform 으로 단계별로 쌓아가는 실습 템플릿입니다.
 
-| 단계 | 브랜치                         | 추가되는 내용                                                            |
-| ---- | ------------------------------ | ------------------------------------------------------------------------ |
-| 0차  | `base/aws-vpc-nat-and-bastion` | VPC, IGW, 공개/사설 서브넷, NAT 인스턴스, Bastion, Private EC2           |
-| 1차  | `add-on-base/1-aws-elb`        | ELB(L7-ALB) 연결하여 사설 서브넷 내 EC2 외부로 서비스 서빙               |
-| 2차  | `add-on-base/2-aws-rds-and-s3` | 데이터베이스 서버를 위한 보조 CIDR + DB 전용 서브넷 2개, RDS(PostgreSQL) |
-| 3차  | `add-on-base/2-aws-rds-and-s3` | S3 버킷(공개 읽기, CORS, 암호화) + 스프링 앱용 IAM 사용자/액세스 키      |
+| 단계 | 브랜치                          | 추가되는 내용                                                                         |
+| ---- | ------------------------------- | ------------------------------------------------------------------------------------- |
+| 0차  | `base/aws-vpc-nat-and-bastion`  | VPC, IGW, 공개/사설 서브넷, NAT 인스턴스, Bastion, Private EC2                        |
+| 1차  | `add-on-base/1-aws-elb`         | ELB(L7-ALB) 연결하여 사설 서브넷 내 EC2 외부로 서비스 서빙                            |
+| 2차  | `add-on-base/2-aws-rds-and-s3`  | 데이터베이스 서버를 위한 보조 CIDR + DB 전용 서브넷 2개, RDS(PostgreSQL)              |
+| 3차  | `add-on-base/2-aws-rds-and-s3`  | S3 버킷(공개 읽기, CORS, 암호화) + 스프링 앱용 IAM 사용자/액세스 키                   |
+| 4차  | `add-on-base/3-aws-ecr-and-ecs` | ECR(이미지 저장소) + ECS Fargate(클러스터, 태스크 정의, 서비스) + GitHub Actions 배포 |
 
 ## 디렉터리 구조
 
@@ -21,6 +22,8 @@ module/resource/ec2           # Bastion, NAT, Private EC2
 module/resource/elb           # [1차] ALB, 대상 그룹, 리스너
 module/resource/rds           # [2차] DB 서브넷 그룹 + PostgreSQL
 module/resource/s3            # [3차] S3 버킷 + 스프링 앱 사용자에게 붙이는 버킷 권한
+module/resource/ecr           # [4차] ECR 저장소 + 오래된 이미지 정리 라이프사이클
+module/resource/ecs           # [4차] ECS 클러스터, 플레이스홀더 태스크 정의, 서비스, 실행 역할
 ```
 
 ## 0차: AWS VPC + SG + EC2 (Private 1 + Public 2)
@@ -305,6 +308,115 @@ unset BUCKET
 terraform destroy      # 실습용 설정이라 force_destroy = true, 객체가 남아 있어도 버킷이 삭제됩니다.
 ```
 
+## 4차: ECR + ECS(Fargate) ← GitHub Actions 로 스프링 앱 배포
+
+```
+ GitHub Actions (스프링 프로젝트 push 시)
+   ① ./gradlew clean build → docker build
+   ② docker push ─────────────────────────────▶ ECR  <project>-<env>-app  (:커밋SHA 7자리, :latest)
+   ③ aws ecs register-task-definition            (같은 family 로 새 개정본이 쌓인다)
+   ④ aws ecs update-service --desired-count 1 ─▶ ECS 클러스터 / 서비스
+                                                      │ 태스크 1개 기동 (Fargate)
+                                                      ▼
+ ┌─ 공개 서브넷 (10.0.0.0/26, 10.0.0.64/26) ───────────────────────────────────┐
+ │  Fargate 태스크 :8080  (ecs-task-sg, 공인 IP 할당)                          │
+ │    - 실행 역할로 ECR 이미지 Pull (공인 IP → IGW 로 직접 나간다, NAT 안 씀)  │
+ └──────────────┬──────────────────────────────────────────────────────────────┘
+                │ 5432 (database-sg 가 ecs-task-sg 를 허용)        S3 ← 앱 사용자 액세스 키
+                ▼
+              RDS PostgreSQL
+
+ 개발자 PC ── http://<태스크 공인 IP>:8080 ──▶ Fargate 태스크   (아직 ALB 연결 전이라 공인 IP 로 직접 확인)
+```
+
+핵심 포인트
+
+- **Terraform 은 "배포 받을 자리" 까지만 만든다**: 클러스터, 서비스, 실행 역할, 그리고 `:placeholder` 이미지를 가리키는 첫 태스크 정의만 만들고 서비스는 `desired_count = 0` 입니다. 실제 이미지와 환경 변수가 담긴 태스크 정의는 GitHub Actions 가 배포할 때마다 새 개정본으로 등록합니다.
+- **`ignore_changes = [task_definition, desired_count]`**: 배포 후 다시 `terraform apply` 해도 GitHub Actions 가 올린 개정본과 태스크 개수를 플레이스홀더로 되돌리지 않습니다.
+- **실행 역할(execution role)**: ECS 가 컨테이너를 "띄우기 위해" ECR 이미지 Pull, CloudWatch 로그 전송에 쓰는 권한입니다. (`AmazonECSTaskExecutionRolePolicy`) 스프링 앱의 S3 접근은 3차의 앱 사용자 액세스 키를 환경 변수로 넣어 처리합니다.
+- **circuit breaker**: 새 태스크가 계속 기동에 실패하면 배포를 FAILED 로 멈춰서, 실패하는 컨테이너를 무한히 재시도하며 비용이 나가는 것을 막습니다.
+- **ECR 라이프사이클**: 태그 없는 이미지는 1일 뒤, 태그 이미지는 최근 10개만 남기고 지웁니다. (= 최근 10번 배포까지 롤백 가능)
+- **CPU / 메모리**: 기본 `512 / 1024` (0.5 vCPU / 1GB). JVM 은 이보다 작으면 느리거나 OOM(종료 코드 137) 으로 죽기 쉽습니다. 허용 조합은 `variables.tf` 주석 참고.
+- **아직 ALB 를 붙이지 않았다**: 태스크를 공개 서브넷에 두고 공인 IP 를 받아 `ecs-task-sg` 로 8080 을 열어 둔 상태입니다. 동작 확인용 구성이며, 현업에서는 태스크를 사설 서브넷에 숨기고 ALB 대상 그룹(`target_type = "ip"`)에 연결합니다.
+
+### 적용
+
+```bash
+terraform apply
+```
+
+### 배포
+
+스프링 프로젝트 [aaronryu/aws-spring-tutorial](https://github.com/aaronryu/aws-spring-tutorial/tree/aws/ecr-ecs/upload-and-deploy) 의 `aws/ecr-ecs/upload-and-deploy` 브랜치를 GitHub Actions 로 배포합니다. (`.github/workflows/ecr-push.yml` + `ecs-task-def.json`)
+
+1. 스프링 프로젝트를 본인 GitHub 로 Fork / 복사한 뒤, 이 Terraform 의 출력값을 **Settings > Secrets and variables > Actions** 에 등록합니다.
+
+   ```bash
+   # 아래 REPO 를 본인 스프링 프로젝트 저장소로 바꾼다 (gh CLI 필요: brew install gh && gh auth login)
+   REPO=<본인 GitHub 계정>/aws-spring-tutorial
+
+   # Variables (비밀 아님): AWS_REGION, ECR_REPOSITORY, ECS_CLUSTER, ECS_SERVICE, ECS_TASKDEF ...
+   terraform output -json github_actions_vars \
+     | jq -r 'to_entries[] | "\(.key) \(.value)"' \
+     | while read -r k v; do gh variable set "$k" --body "$v" -R "$REPO"; done
+
+   # Secrets (비밀): DATASOURCE_URL / USERNAME / PASSWORD, APP_AWS_ACCESS_KEY_ID / APP_AWS_SECRET_ACCESS_KEY
+   terraform output -json github_actions_secrets \
+     | jq -r 'to_entries[] | "\(.key) \(.value)"' \
+     | while read -r k v; do gh secret set "$k" --body "$v" -R "$REPO"; done
+   unset REPO
+   ```
+
+   - 워크플로우가 ECR Push / ECS 배포에 쓰는 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` 는 Terraform 출력에 없습니다. 배포 권한이 있는 IAM 사용자의 키를 GitHub 페이지에서 직접 Secrets 에 추가합니다.
+   - 화면에 출력된 `-json` 결과를 복사해 붙여 넣지 마세요. 비밀번호의 `&` 같은 문자가 `&` 으로 이스케이프되어 있습니다. 위처럼 `jq -r` 를 거치면 원래 문자로 풀려서 등록됩니다.
+
+2. `aws/ecr-ecs/upload-and-deploy` 브랜치에 push 하면 (또는 Actions 탭에서 Re-run) 빌드 → ECR Push → 태스크 정의 등록 → 서비스 업데이트 → 안정화 대기까지 진행됩니다.
+
+### 확인
+
+배포가 끝나면 태스크의 공인 IP 를 찾아 직접 접속합니다.
+
+```bash
+# 1) 서비스에서 실행 중인 태스크 → 그 태스크의 네트워크 인터페이스(ENI) → 공인 IP 순으로 찾는다
+CLUSTER=$(terraform output -json github_actions_vars | jq -r .ECS_CLUSTER)
+SERVICE=$(terraform output -json github_actions_vars | jq -r .ECS_SERVICE)
+TASK=$(aws ecs list-tasks --cluster "$CLUSTER" --service-name "$SERVICE" --query 'taskArns[0]' --output text)
+ENI=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value" --output text)
+IP=$(aws ec2 describe-network-interfaces --network-interface-ids "$ENI" --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
+echo "$IP"
+
+# 2) 헬스체크: actuator health 는 DB 연결까지 확인하므로 {"status":"UP"} 이면 RDS 연결도 정상
+curl "http://$IP:8080/actuator/health"
+```
+
+브라우저에서 `http://<위에서 찾은 IP>:8080/files/page` 에 들어가면 파일 업로드 / 목록 / 삭제 화면이 뜹니다. 파일을 올려 보면 RDS(파일 메타데이터)와 S3(파일 본문)가 실제로 함께 동작하는 것을 확인할 수 있습니다.
+
+![성공적으로 스프링 어플리케이션이 퍼블릭 ECS 내 배포되었을때](ecs-spring-succeed.png)
+
+```bash
+unset CLUSTER SERVICE TASK ENI IP
+```
+
+- 태스크 공인 IP 는 **배포할 때마다 바뀝니다.** (새 태스크 = 새 ENI) 재배포했다면 위 1) 을 다시 실행하세요. 고정 주소가 필요한 이유이고, 다음 단계에서 ALB 를 붙이는 이유입니다.
+- 배포가 FAILED 로 끝나거나 태스크가 계속 죽는다면 멈춘 이유를 확인합니다.
+
+  ```bash
+  CLUSTER=$(terraform output -json github_actions_vars | jq -r .ECS_CLUSTER)
+  STOPPED=$(aws ecs list-tasks --cluster "$CLUSTER" --desired-status STOPPED --query 'taskArns[0]' --output text)
+  aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$STOPPED" \
+    --query 'tasks[0].{reason:stoppedReason,exit:containers[0].exitCode,detail:containers[0].reason}'
+  unset CLUSTER STOPPED
+  ```
+
+  - `CannotPullContainerError`: ECR 저장소 이름 / 이미지 태그, 또는 태스크의 인터넷 경로(공인 IP) 확인
+  - 종료 코드 `1`: 스프링 앱 기동 실패 (DB 접속 정보, 프로파일 설정 등) / `137`: 메모리 부족
+
+### 정리
+
+```bash
+terraform destroy      # 실습용 설정이라 ECR force_delete = true, 이미지가 남아 있어도 저장소가 삭제됩니다.
+```
+
 ## 비용 참고 (서울 리전, 대략)
 
-t3.micro × 3 (Bastion, NAT, Private EC2) + [1차] ALB 1개(시간당 요금 + LCU 사용량) + [2차] RDS `db.t3.micro` + gp3 20GB + [3차] S3 (저장 용량 + 요청 수, 실습 수준이면 거의 0). 실습 후에는 꼭 `terraform destroy` 하세요.
+t3.micro × 3 (Bastion, NAT, Private EC2) + [1차] ALB 1개(시간당 요금 + LCU 사용량) + [2차] RDS `db.t3.micro` + gp3 20GB + [3차] S3 (저장 용량 + 요청 수, 실습 수준이면 거의 0) + [4차] Fargate 태스크 0.5 vCPU / 1GB (실행 중인 시간만큼) + 태스크 공인 IPv4 + ECR 저장 용량. 실습 후에는 꼭 `terraform destroy` 하세요.

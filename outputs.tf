@@ -52,11 +52,17 @@ data "aws_region" "current" {}
 
 output "github_actions_vars" {
   value = {
-    AWS_REGION     = data.aws_region.current.region
-    AWS_ACCOUNT_ID = data.aws_caller_identity.current.account_id
-    AWS_S3_BUCKET  = module.s3.bucket_name
-    ECR_REGISTRY   = module.ecr.repository_url
-    ECR_REPOSITORY = module.ecr.repository_name
+    AWS_REGION             = data.aws_region.current.region
+    AWS_ACCOUNT_ID         = data.aws_caller_identity.current.account_id
+    AWS_S3_BUCKET          = module.s3.bucket_name
+    ECR_REGISTRY           = module.ecr.registry
+    ECR_REPOSITORY         = module.ecr.repository_name
+    ECR_REPOSITORY_URL     = module.ecr.repository_url
+    ECS_CLUSTER            = module.ecs.cluster_name
+    ECS_SERVICE            = module.ecs.service_name
+    ECS_TASKDEF            = module.ecs.task_definition
+    ECS_CONTAINER          = module.ecs.container_name
+    ECS_EXECUTION_ROLE_ARN = module.ecs.execution_role_arn
   }
 }
 

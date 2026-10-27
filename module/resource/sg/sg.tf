@@ -112,6 +112,35 @@ resource "aws_security_group" "private_server_sg" {
   }
 }
 
+# 5. ECS Task SG: 컨테이너 포트는 외부에서 접근 가능 (아직은 ALB 연결하지 않았기에 Public Open)
+resource "aws_security_group" "ecs_task_sg" {
+  name        = "ecs-task-sg"
+  description = "Security Group for ECS Fargate tasks"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description     = "Container port from Public IPs"
+    from_port       = var.app_port
+    to_port         = var.app_port
+    protocol        = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # ECR 이미지 Pull, CloudWatch 로그 전송, Secrets Manager 호출 등은 NAT 인스턴스를 거쳐 나간다.
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "${var.project_name}-${var.environment}-ecs-task-sg"
+    ManagedBy   = "aaron"
+    Environment = var.environment
+  }
+}
+
 # 4. Database SG: Private EC2 의 SG 에서 오는 PostgreSQL(5432) 연결만 허용
 #    - IP 대역이 아닌 "SG 를 소스로" 지정하면, EC2 가 늘어나거나 IP 가 바뀌어도 규칙을 고칠 필요가 없다.
 #    - 추가로 개발자 로컬에서 DBeaver 같은 클라이언트를 통해 운영 데이터베이스에 접근할 수 있도록 Bastion 에 대해서 추가 허용
@@ -126,7 +155,10 @@ resource "aws_security_group" "database_sg" {
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
-    security_groups = [aws_security_group.private_server_sg.id]
+    security_groups = [
+      aws_security_group.private_server_sg.id,
+      aws_security_group.ecs_task_sg.id,
+    ]
   }
 
   ingress {

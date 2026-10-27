@@ -17,3 +17,7 @@ cors_allowed_methods = ["GET", "HEAD"]
 cors_allowed_origins = [
   "http://localhost:8080"
 ]
+
+# ECS 내 컨테이너 자원 사양을 바꿀때
+# ecs_task_cpu    = 512
+# ecs_task_memory = 1024
